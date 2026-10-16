@@ -19,7 +19,7 @@ from typing import Protocol
 from google.genai import types
 
 from app.config import REQUIRED_EMBEDDING_MODEL, Settings, get_settings
-from app.llm.gemini import GeminiError, RateLimiter, call_with_retries, make_client
+from app.llm.gemini import GeminiError, GeminiInvalidRequestError, RateLimiter, call_with_retries, make_client
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,9 @@ class GeminiEmbedder:
         self.stats = EmbeddingStats()
         self._client = client or make_client(self.settings)
         self._limiter = RateLimiter(self.settings.embedding_requests_per_minute)
+        # Vertex AI may accept only one input per gemini-embedding-001 request; switch to single-text
+        # requests automatically if a batched request is rejected.
+        self._single_input = False
 
     def _embed(self, texts: list[str], task_type: str) -> list[list[float]]:
         config = types.EmbedContentConfig(
@@ -138,6 +141,18 @@ class GeminiEmbedder:
         self.stats.characters_embedded += sum(len(t) for t in texts)
         return vectors
 
+    def _embed_batch(self, batch: list[str], task_type: str) -> list[list[float]]:
+        if self._single_input or len(batch) == 1:
+            return [self._embed([text], task_type)[0] for text in batch]
+        try:
+            return self._embed(batch, task_type)
+        except GeminiInvalidRequestError:
+            if not self.settings.google_genai_use_vertexai:
+                raise
+            logger.warning("Vertex AI rejected a batched embedding request; using one text per request.")
+            self._single_input = True
+            return [self._embed([text], task_type)[0] for text in batch]
+
     def embed_documents(
         self, texts: Sequence[str], on_batch: Callable[[int, list[list[float]]], None] | None = None
     ) -> list[list[float]]:
@@ -147,7 +162,7 @@ class GeminiEmbedder:
         size = self.settings.embedding_batch_size
         for offset in range(0, len(texts), size):
             batch = list(texts[offset : offset + size])
-            vectors = self._embed(batch, DOCUMENT_TASK_TYPE)
+            vectors = self._embed_batch(batch, DOCUMENT_TASK_TYPE)
             if on_batch:
                 on_batch(offset, vectors)
             out.extend(vectors)

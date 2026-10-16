@@ -21,7 +21,7 @@ from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
-from app.config import Settings, get_settings
+from app.config import ConfigurationError, Settings, get_settings
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -83,6 +83,18 @@ def classify_error(exc: BaseException) -> GeminiError:
             return GeminiInvalidRequestError(f"Gemini rejected the request (HTTP {code} {status}). {message[:300]}")
         if code >= 500:
             return GeminiUnavailableError(f"Gemini service error (HTTP {code} {status}).")
+    try:
+        from google.auth import exceptions as auth_exceptions
+
+        if isinstance(exc, (auth_exceptions.DefaultCredentialsError, auth_exceptions.RefreshError)):
+            return GeminiAuthError(
+                "Google Cloud credentials were rejected or expired (Vertex AI). Check "
+                "GOOGLE_APPLICATION_CREDENTIALS or rerun `gcloud auth application-default login`."
+            )
+        if isinstance(exc, auth_exceptions.TransportError):
+            return GeminiUnavailableError("Could not reach Google to refresh Vertex AI credentials (network error).")
+    except ImportError:  # pragma: no cover - google-auth is a dependency of google-genai
+        pass
     if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
         return GeminiUnavailableError("Gemini request timed out.")
     if isinstance(exc, (httpx.TransportError, ConnectionError)):
@@ -118,14 +130,48 @@ def call_with_retries(
             sleep(delay)
 
 
+VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+
+def _vertex_credentials(settings: Settings):
+    """Service-account JSON if GOOGLE_APPLICATION_CREDENTIALS is set, else Application Default
+    Credentials (`gcloud auth application-default login`, or the machine's attached identity)."""
+    import google.auth
+    from google.auth import exceptions as auth_exceptions
+    from google.oauth2 import service_account
+
+    path = settings.google_application_credentials
+    if path:
+        path = path.expanduser()
+        if not path.is_file():
+            raise ConfigurationError(f"GOOGLE_APPLICATION_CREDENTIALS file not found: {path}")
+        return service_account.Credentials.from_service_account_file(str(path), scopes=VERTEX_SCOPES)
+    try:
+        credentials, _ = google.auth.default(scopes=VERTEX_SCOPES)
+    except auth_exceptions.DefaultCredentialsError as exc:
+        raise ConfigurationError(
+            "Vertex AI credentials not found. Set GOOGLE_APPLICATION_CREDENTIALS to your service-account "
+            "JSON file, or run `gcloud auth application-default login`."
+        ) from exc
+    return credentials
+
+
 def make_client(settings: Settings | None = None) -> genai.Client:
-    """SDK-level retries stay disabled (no ``retry_options``); :func:`call_with_retries`
+    """Create a google-genai client for the Gemini Developer API (API key) or Vertex AI.
+
+    SDK-level retries stay disabled (no ``retry_options``); :func:`call_with_retries`
     is the single, bounded retry policy."""
     settings = settings or get_settings()
-    return genai.Client(
-        api_key=settings.require_gemini_key(),
-        http_options=types.HttpOptions(timeout=int(settings.gemini_timeout_seconds * 1000)),
-    )
+    http_options = types.HttpOptions(timeout=int(settings.gemini_timeout_seconds * 1000))
+    if settings.google_genai_use_vertexai:
+        return genai.Client(
+            vertexai=True,
+            project=settings.require_vertex_project(),
+            location=settings.google_cloud_location,
+            credentials=_vertex_credentials(settings),
+            http_options=http_options,
+        )
+    return genai.Client(api_key=settings.require_gemini_key(), http_options=http_options)
 
 
 class RateLimiter:

@@ -43,7 +43,16 @@ class Settings(BaseSettings):
     log_format: str = Field(default="json", description="json | text")
 
     # --- Gemini -------------------------------------------------------------
+    # Two ways to reach Gemini through the same google-genai SDK:
+    #   1. Gemini Developer API: GOOGLE_API_KEY
+    #   2. Vertex AI (Google Cloud): GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT +
+    #      GOOGLE_CLOUD_LOCATION, authenticated with a service-account JSON
+    #      (GOOGLE_APPLICATION_CREDENTIALS) or `gcloud auth application-default login`.
     google_api_key: SecretStr | None = None
+    google_genai_use_vertexai: bool = False
+    google_cloud_project: str | None = None
+    google_cloud_location: str = "us-central1"
+    google_application_credentials: Path | None = None
     gemini_model: str = Field(default="", description="Generation model, e.g. gemini-3.5-flash")
     gemini_timeout_seconds: float = 60.0
     gemini_max_retries: int = Field(default=4, ge=0, le=10)
@@ -129,6 +138,14 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("google_application_credentials", "google_cloud_project", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value):
+        # An empty `KEY=` line in .env means "not set" (Path("") would otherwise become ".").
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("gemini_thinking_level")
     @classmethod
     def _check_thinking_level(cls, value: str | None) -> str | None:
@@ -178,12 +195,31 @@ class Settings(BaseSettings):
     def vector_index_supported(self) -> bool:
         return self.embedding_dimensions <= PGVECTOR_MAX_INDEXED_DIMENSIONS
 
+    @property
+    def gemini_backend(self) -> str:
+        return "vertex" if self.google_genai_use_vertexai else "api_key"
+
+    @property
+    def gemini_configured(self) -> bool:
+        if self.google_genai_use_vertexai:
+            return bool(self.google_cloud_project and self.google_cloud_project.strip())
+        return self.google_api_key is not None and bool(self.google_api_key.get_secret_value().strip())
+
     def require_gemini_key(self) -> str:
         if self.google_api_key is None or not self.google_api_key.get_secret_value().strip():
             raise ConfigurationError(
-                "GOOGLE_API_KEY is not set. Add it to epolicies-rag/.env (never to frontend env files)."
+                "GOOGLE_API_KEY is not set. Add it to epolicies-rag/.env (never to frontend env files), "
+                "or set GOOGLE_GENAI_USE_VERTEXAI=true with GOOGLE_CLOUD_PROJECT to use Vertex AI."
             )
         return self.google_api_key.get_secret_value().strip()
+
+    def require_vertex_project(self) -> str:
+        if not self.google_cloud_project or not self.google_cloud_project.strip():
+            raise ConfigurationError(
+                "GOOGLE_GENAI_USE_VERTEXAI=true but GOOGLE_CLOUD_PROJECT is not set. Add your Google Cloud "
+                "project ID (and GOOGLE_CLOUD_LOCATION) to epolicies-rag/.env."
+            )
+        return self.google_cloud_project.strip()
 
     def require_generation_model(self) -> str:
         if not self.gemini_model.strip():
@@ -197,7 +233,8 @@ class Settings(BaseSettings):
         return {
             "app_env": self.app_env,
             "gemini_model": self.gemini_model or None,
-            "gemini_configured": self.google_api_key is not None,
+            "gemini_backend": self.gemini_backend,
+            "gemini_configured": self.gemini_configured,
             "embedding_model": self.embedding_model,
             "embedding_dimensions": self.embedding_dimensions,
             "chunk_size": self.chunk_size,

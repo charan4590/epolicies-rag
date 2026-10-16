@@ -56,7 +56,7 @@ python -m app.cli setup
 The wizard asks for:
 
 1. **The folder with your .md files** — use the folder that directly holds the policy `.md` files (for a scraper project like `C:\epolicies_project`, that is `C:\epolicies_project\output`, **not** the parent folder, otherwise `output_backup` and `history` copies get indexed too). Paste its full path (Windows: Shift+right-click the folder → *Copy as path*; Mac: Option+right-click → *Copy as Pathname*). It counts the files so you can confirm (~235). The files stay where they are and are never changed.
-2. **Your Google API key** (hidden while typing) and the answer model (default `gemini-3.5-flash`).
+2. **How your company provides Gemini**: `1` = an API key (paste it; hidden while typing), or `2` = Vertex AI (Google Cloud project ID, region, and the path to the service-account `.json` file IT gives you). Then the answer model (default `gemini-3.5-flash`).
 3. **Database details** (host, port, name, user, password).
 
 It writes `epolicies-rag/.env`, creates the tables, tests everything, and offers to index your documents.

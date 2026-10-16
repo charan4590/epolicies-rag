@@ -170,3 +170,52 @@ def test_settings_resolve_relative_paths_against_project_root():
     assert "google_api_key" not in settings.public_summary()
     with pytest.raises(ValueError, match="CHUNK_OVERLAP"):
         Settings(_env_file=None, chunk_size=100, chunk_overlap=100)
+
+
+# --------------------------------------------------------------------------- Vertex AI
+def test_vertex_settings_and_client(monkeypatch, tmp_path):
+    from app.llm import gemini as gemini_module
+
+    blank = Settings(_env_file=None, google_application_credentials="", google_cloud_project="  ")
+    assert blank.google_application_credentials is None and blank.google_cloud_project is None
+    assert blank.gemini_backend == "api_key"
+
+    captured = {}
+    monkeypatch.setattr(gemini_module.genai, "Client", lambda **kw: captured.update(kw) or SimpleNamespace())
+    monkeypatch.setattr(gemini_module, "_vertex_credentials", lambda settings: "CREDS")
+    vertex = Settings(_env_file=None, google_genai_use_vertexai=True, google_cloud_project="acme-prj",
+                      google_cloud_location="europe-west4", google_api_key=None)
+    assert vertex.gemini_configured and vertex.gemini_backend == "vertex"
+    gemini_module.make_client(vertex)
+    assert captured["vertexai"] is True and captured["project"] == "acme-prj"
+    assert captured["location"] == "europe-west4" and captured["credentials"] == "CREDS"
+    assert "api_key" not in captured
+
+    from app.config import ConfigurationError
+    with pytest.raises(ConfigurationError, match="GOOGLE_CLOUD_PROJECT"):
+        gemini_module.make_client(Settings(_env_file=None, google_genai_use_vertexai=True))
+    missing = Settings(_env_file=None, google_genai_use_vertexai=True, google_cloud_project="p",
+                       google_application_credentials=str(tmp_path / "nope.json"))
+    monkeypatch.undo()
+    with pytest.raises(ConfigurationError, match="file not found"):
+        gemini_module.make_client(missing)
+
+
+def test_vertex_embedding_falls_back_to_single_inputs():
+    embedder, models = make_embedder([api_error(400, "INVALID_ARGUMENT", "only one instance allowed")],
+                                     google_genai_use_vertexai=True, google_cloud_project="p")
+    vectors = embedder.embed_documents(["a", "b", "c"])
+    assert len(vectors) == 3
+    sizes = [len(c["contents"]) for c in models.calls]
+    assert sizes[0] == 2 and all(n == 1 for n in sizes[1:])  # rejected batch, then one text per request
+    # API-key mode does not hide invalid requests
+    embedder, _ = make_embedder([api_error(400, "INVALID_ARGUMENT")])
+    with pytest.raises(GeminiInvalidRequestError):
+        embedder.embed_documents(["a", "b"])
+
+
+def test_google_auth_errors_are_auth_errors():
+    from google.auth import exceptions as auth_exceptions
+
+    assert isinstance(classify_error(auth_exceptions.RefreshError("expired")), GeminiAuthError)
+    assert isinstance(classify_error(auth_exceptions.DefaultCredentialsError("none")), GeminiAuthError)

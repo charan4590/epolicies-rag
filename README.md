@@ -118,6 +118,21 @@ DATABASE_URL=postgresql://postgres:password@localhost:5432/epolicies
 MARKDOWN_DIR=./data/markdown        # or an absolute path to your existing folder
 ```
 
+**Vertex AI instead of an API key** (common for company Google Cloud accounts): the same
+`google-genai` SDK is used, only the credentials change:
+
+```dotenv
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+GOOGLE_APPLICATION_CREDENTIALS=C:/keys/epolicies-sa.json   # or leave empty and run: gcloud auth application-default login
+```
+
+The service account needs the **Vertex AI User** role (`roles/aiplatform.user`) in that project. If Vertex
+rejects batched embedding requests, the app automatically switches to one text per request.
+(Vertex AI support is covered by unit tests with a mocked client; it has not been run against a real
+Google Cloud project yet.)
+
 `.env` is read from `epolicies-rag/.env` (or `backend/.env`); relative paths resolve against
 `epolicies-rag/`. `.env` files are git-ignored. **Never** put the API key or database URL in any
 frontend env file.
@@ -397,6 +412,7 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | Variable | Default | Meaning |
 |---|---|---|
 | `GOOGLE_API_KEY` | — | Gemini API key (server only) |
+| `GOOGLE_GENAI_USE_VERTEXAI` / `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` / `GOOGLE_APPLICATION_CREDENTIALS` | `false` / — / `us-central1` / — | Use Vertex AI instead of an API key |
 | `GEMINI_MODEL` | — (required for chat) | Generation model for planning, evidence checks, answers, verification |
 | `GEMINI_TIMEOUT_SECONDS` / `GEMINI_MAX_RETRIES` / `GEMINI_TEMPERATURE` | 60 / 4 / 0.1 | Generation call limits |
 | `GEMINI_THINKING_LEVEL` / `GEMINI_THINKING_BUDGET` | unset | Optional reasoning controls (Gemini 3 / 2.5 models) |

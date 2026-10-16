@@ -256,7 +256,7 @@ export interface HealthResponse {
     embedding_configs: string[];
     last_indexed_at: string | null;
   } | null;
-  gemini: { configured: boolean; generation_model: string | null; embedding_model: string; embedding_dimensions: number };
+  gemini: { configured: boolean; backend?: "api_key" | "vertex"; generation_model: string | null; embedding_model: string; embedding_dimensions: number };
   config: Record<string, unknown>;
 }
 

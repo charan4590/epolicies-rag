@@ -36,7 +36,8 @@ DOCUMENT_ID_RE = re.compile(r"^doc_[0-9a-f]{24}$")
 def health(settings: Settings = Depends(settings_dep)):
     """Database connectivity, pgvector/schema state and configuration (no secrets)."""
     gemini = {
-        "configured": settings.google_api_key is not None and bool(settings.google_api_key.get_secret_value()),
+        "configured": settings.gemini_configured,
+        "backend": settings.gemini_backend,
         "generation_model": settings.gemini_model or None,
         "embedding_model": settings.embedding_model,
         "embedding_dimensions": settings.embedding_dimensions,

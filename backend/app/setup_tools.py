@@ -140,13 +140,30 @@ def check_gemini(report: Report) -> None:
 
     from app.llm.gemini import GeminiError, classify_error, make_client
 
+    from app.config import ConfigurationError
+
     settings = get_settings()
-    key = settings.google_api_key.get_secret_value().strip() if settings.google_api_key else ""
-    if not key:
-        report.fail("GOOGLE_API_KEY is not set", "add GOOGLE_API_KEY=<your key> to epolicies-rag/.env")
+    if settings.google_genai_use_vertexai:
+        print(f"       Using Vertex AI: project={settings.google_cloud_project or '(not set)'} "
+              f"location={settings.google_cloud_location}")
+        if not settings.gemini_configured:
+            report.fail("GOOGLE_CLOUD_PROJECT is not set", "add GOOGLE_CLOUD_PROJECT=<project id> to epolicies-rag/.env")
+            return
+        creds = settings.google_application_credentials
+        report.ok("Credentials: " + (f"service-account file {creds}" if creds else
+                                     "Application Default Credentials (gcloud login)"))
+    else:
+        key = settings.google_api_key.get_secret_value().strip() if settings.google_api_key else ""
+        if not key:
+            report.fail("GOOGLE_API_KEY is not set",
+                        "add GOOGLE_API_KEY=<your key> to epolicies-rag/.env (or configure Vertex AI)")
+            return
+        report.ok(f"Using a Gemini API key ({len(key)} characters)")
+    try:
+        client = make_client(settings)
+    except ConfigurationError as exc:
+        report.fail(str(exc), "fix the Gemini settings in epolicies-rag/.env")
         return
-    report.ok(f"GOOGLE_API_KEY is set ({len(key)} characters)")
-    client = make_client(settings)
     try:
         result = client.models.embed_content(
             model=settings.embedding_model, contents=["connection test"],
@@ -161,7 +178,7 @@ def check_gemini(report: Report) -> None:
     except Exception as exc:  # noqa: BLE001
         error = classify_error(exc)
         report.fail(f"{settings.embedding_model} failed: {error}",
-                    "confirm the key is valid and has access to gemini-embedding-001")
+                    "confirm the key/project is valid and has access to gemini-embedding-001")
     if not settings.gemini_model:
         report.fail("GEMINI_MODEL is not set (needed for chat answers)",
                     "add GEMINI_MODEL=gemini-3.5-flash (or another model your key can use) to .env")
@@ -290,7 +307,22 @@ def run_setup() -> int:
 
     # 2. Gemini
     print("\nStep 2/4 — Google Gemini")
-    key = _ask("  GOOGLE_API_KEY (input is hidden)", secret=True)
+    print("  How does your company give you Gemini?")
+    print("    1 = an API key (Google AI Studio)")
+    print("    2 = Vertex AI (a Google Cloud project)")
+    choice = _ask("  Enter 1 or 2", "1")
+    gemini: dict[str, str] = {}
+    if choice.strip() == "2":
+        gemini["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+        gemini["GOOGLE_CLOUD_PROJECT"] = _ask("  Google Cloud project ID")
+        gemini["GOOGLE_CLOUD_LOCATION"] = _ask("  Region (GOOGLE_CLOUD_LOCATION)", "us-central1")
+        creds = input("  Path to the service-account JSON file (Enter if you use `gcloud auth "
+                      "application-default login`): ").strip()
+        if creds:
+            gemini["GOOGLE_APPLICATION_CREDENTIALS"] = clean_path_input(creds).resolve().as_posix()
+    else:
+        gemini["GOOGLE_GENAI_USE_VERTEXAI"] = "false"
+        gemini["GOOGLE_API_KEY"] = _ask("  GOOGLE_API_KEY (input is hidden)", secret=True)
     model = _ask("  Generation model for answers (GEMINI_MODEL)", "gemini-3.5-flash")
 
     # 3. PostgreSQL
@@ -306,7 +338,7 @@ def run_setup() -> int:
     # 4. Write .env
     print("\nStep 4/4 — Saving settings")
     backup = write_env({
-        "GOOGLE_API_KEY": key,
+        **gemini,
         "GEMINI_MODEL": model,
         "EMBEDDING_MODEL": "gemini-embedding-001",
         "DATABASE_URL": url,
