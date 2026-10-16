@@ -17,11 +17,11 @@ extension** (they give you host, port, database name, user and password).
 ## 2. Get the project
 
 ```
-git clone https://github.com/charan4590/VeritasAI-Multi-Agent-Research-Intelligence-Platform.git
-cd VeritasAI-Multi-Agent-Research-Intelligence-Platform
-git checkout epolicies-rag
+git clone https://github.com/charan4590/epolicies-rag.git
 cd epolicies-rag
 ```
+
+(The repository is private: sign in to GitHub on that laptop, or download it as a ZIP from the GitHub page.)
 
 ## 3. Start a database
 
