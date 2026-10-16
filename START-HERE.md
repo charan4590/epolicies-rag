@@ -21,7 +21,7 @@ git clone https://github.com/charan4590/epolicies-rag.git
 cd epolicies-rag
 ```
 
-(The repository is private: sign in to GitHub on that laptop, or download it as a ZIP from the GitHub page.)
+(No Git? Download it as a ZIP: GitHub page → green **Code** button → **Download ZIP**.)
 
 ## 3. Start a database
 
