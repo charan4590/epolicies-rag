@@ -95,6 +95,10 @@ class Settings(BaseSettings):
     max_context_chars: int = Field(default=24_000, ge=2_000)
     planner_mode: str = Field(default="auto", description="auto | always | never")
     llm_citation_verification: bool = True
+    strict_grounding: bool = Field(
+        default=True,
+        description="Never show an answer that has no verified citation to the indexed documents.",
+    )
     max_history_turns: int = Field(default=3, ge=0, le=10)
     max_question_chars: int = Field(default=2000, ge=10, le=10_000)
 
@@ -206,6 +210,7 @@ class Settings(BaseSettings):
             "max_retrieval_rounds": self.max_retrieval_rounds,
             "planner_mode": self.planner_mode,
             "llm_citation_verification": self.llm_citation_verification,
+            "strict_grounding": self.strict_grounding,
         }
 
 

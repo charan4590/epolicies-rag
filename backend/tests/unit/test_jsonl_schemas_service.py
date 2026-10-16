@@ -220,3 +220,20 @@ def test_conversation_history_is_bounded(service):
                       history=[{"role": "user", "content": f"m{i}"} for i in range(10)])
     assert len(service._load_history(req)) == get_settings().max_history_turns * 2
     assert uuid.UUID(int=0)  # keep uuid import used
+
+
+def test_strict_grounding_withholds_uncited_general_knowledge(service, monkeypatch):
+    chunks = [rc("k", "The kitchen closes at 8 pm.", "Office Kitchen Guidelines")]
+    service.lookup_rows["k"] = {"document_id": "doc_k", "status": "indexed"}
+    monkeypatch.setattr(RetrievalAgent, "run", lambda *a, **k: RetrievalOutcome(
+        chunks=chunks, all_retrieved_ids={"k"}, stop_reason="sufficient_evidence"))
+    # The model ignores the sources and answers from general knowledge, citing nothing (or a fake label).
+    uncited = {"answer_markdown": "Medicare Part B generally covers 80% of approved costs [S9].",
+               "claims": [{"statement": "Medicare Part B covers 80% of approved costs", "source_ids": ["S9"],
+                           "support": "explicit"}],
+               "insufficient_evidence": False, "missing_information": [], "conflicts": []}
+    service.llm.handlers.update({"answer": uncited, "revision": uncited})
+    response = service.answer(ChatRequest(question="What does Medicare Part B cover?", persist=False))
+    assert response.answer == NO_EVIDENCE_REPLY
+    assert response.insufficient_evidence and response.citations == []
+    assert "80%" not in response.answer

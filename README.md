@@ -413,6 +413,7 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | `MAX_CONTEXT_CHUNKS` / `MAX_CONTEXT_CHARS` | 12 / 24000 | Context sent to the answer model |
 | `PLANNER_MODE` | `auto` | `auto` (LLM planner only when useful), `always`, `never` |
 | `LLM_CITATION_VERIFICATION` | `true` | Gemini check of weakly supported claims |
+| `STRICT_GROUNDING` | `true` | Withhold any answer that has no verified citation to your documents |
 | `MAX_HISTORY_TURNS` / `CHAT_TIMEOUT_SECONDS` | 3 / 180 | Conversation context bound / request deadline |
 | `CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Allowed browser origins |
 | `ADMIN_API_TOKEN` | unset (admin API disabled) | Required header value for `/ingest*` |
@@ -461,6 +462,25 @@ PostgreSQL schema (`backend/app/database/schema.sql`):
 * `ingestion_runs`, `ingestion_events` — per-run report and per-document stage/status/error/retries.
 * `conversations`, `messages` — optional chat history.
 * `schema_meta` — schema version, embedding model and dimensions.
+
+## Your documents are the only knowledge source
+
+* **No training.** RAG does not train or fine-tune any model. Your Markdown files are indexed in your own
+  PostgreSQL database and, for each question, the most relevant passages are retrieved and handed to Gemini
+  with instructions to answer **only** from them.
+* **No outside knowledge in answers.** Every statement must cite a retrieved passage; citations are checked
+  in code, unsupported statements are removed in a revision step, and with `STRICT_GROUNDING=true`
+  (default) an answer that cites none of your documents is replaced by *"I could not find information about
+  this in the indexed policy documents…"*.
+* **No web access.** The app never searches the web, never uses Gemini's Google Search grounding tool, and
+  never opens the URLs found inside your documents (they are only shown as links). The frontend uses
+  system fonts and loads nothing from third-party sites.
+* **What does leave the computer:** only calls to the Google Gemini API — chunk text during ingestion (to
+  create embeddings) and, per question, the question plus the retrieved passages. Use a key issued under
+  your company's agreement with Google: Google's Gemini API terms say paid-tier prompts are not used to
+  improve Google's models, while free-tier data may be. Confirm with your company that sending the policy
+  text to Gemini is approved.
+* Installing dependencies (`pip`, `npm`) needs internet once, or your company's package mirror.
 
 ## Design notes and limitations
 

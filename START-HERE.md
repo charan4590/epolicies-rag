@@ -55,7 +55,7 @@ python -m app.cli setup
 
 The wizard asks for:
 
-1. **The folder with your .md files** — paste its full path (Windows: Shift+right-click the folder → *Copy as path*; Mac: Option+right-click → *Copy as Pathname*). It counts the files so you can confirm (~235). The files stay where they are and are never changed.
+1. **The folder with your .md files** — use the folder that directly holds the policy `.md` files (for a scraper project like `C:\epolicies_project`, that is `C:\epolicies_project\output`, **not** the parent folder, otherwise `output_backup` and `history` copies get indexed too). Paste its full path (Windows: Shift+right-click the folder → *Copy as path*; Mac: Option+right-click → *Copy as Pathname*). It counts the files so you can confirm (~235). The files stay where they are and are never changed.
 2. **Your Google API key** (hidden while typing) and the answer model (default `gemini-3.5-flash`).
 3. **Database details** (host, port, name, user, password).
 
@@ -87,6 +87,13 @@ npm run dev
 ```
 
 Open **http://localhost:3000**. The *Knowledge base* page lists your documents; ask a question in *Chat*.
+
+## Answers come only from your files
+
+The assistant answers only from your indexed `.md` files and never searches the internet. If the
+documents don't cover a question, it says so instead of guessing (`STRICT_GROUNDING=true`). The only
+outside connection is the Google Gemini API (your company key). See "Your documents are the only
+knowledge source" in README.md.
 
 ## When something is wrong
 

@@ -166,6 +166,21 @@ class RAGService:
                                                      check)
         mark("verification", t)
         response = self._build_response(plan, final_answer, generated, report, revised, label_map)
+        if self.settings.strict_grounding and not response.citations:
+            # Strict grounding: an answer that cites none of the indexed documents could only have come
+            # from the model's general knowledge, so it is withheld.
+            response.answer = NO_EVIDENCE_REPLY
+            response.insufficient_evidence = True
+            response.missing_information = response.missing_information or [
+                "No statement in the draft answer could be tied to a passage in the indexed documents."
+            ]
+            response.conflicts = []
+            response.verification = VerificationInfo(
+                status="not_applicable", revised=response.verification.revised,
+                llm_checked=response.verification.llm_checked,
+                removed_citations=response.verification.removed_citations,
+                notes=["The draft answer was withheld because it was not supported by any indexed document."],
+            )
         return self._finish(request, plan, response, outcome, report, usage, timings, started)
 
     # ------------------------------------------------------------------ verification
