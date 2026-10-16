@@ -1,0 +1,13 @@
+// Evaluation cases for the SYNTHETIC fixtures in tests/fixtures/markdown (not the real ePolicies corpus).
+// expected_sources were written by reading those fixture files. human_reviewed=false: not reviewed by a person.
+{"id": "fx-direct-01", "category": "direct_fact", "question": "How many days of sick leave do full-time employees get?", "expected_sources": ["hr/leave-policy.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-term-01", "category": "exact_terminology", "question": "What does the policy say about public Wi-Fi and the VPN?", "expected_sources": ["it/remote-work-policy.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-id-01", "category": "policy_identifier", "question": "What does HR-POL-019 cover?", "expected_sources": ["hr/remote-work-policy.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-id-02", "category": "policy_identifier", "question": "Is software SW-042 approved or restricted?", "expected_sources": ["it/acceptable-use.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-table-01", "category": "table", "question": "What is the internet reimbursement allowance for home workers?", "expected_sources": ["hr/remote-work-policy.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-table-02", "category": "table", "question": "What is the daily meal allowance for international travel?", "expected_sources": ["finance/travel-expenses.md", "finance/archive/travel-expenses-copy.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-multisection-01", "category": "multi_section", "question": "How many PTO days can be carried over, and what is the exception for approved projects?", "expected_sources": ["hr/leave-policy.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-multidoc-01", "category": "multi_document", "question": "What are the remote work rules and the security requirements for connecting remotely?", "expected_sources": ["hr/remote-work-policy.md", "it/remote-work-policy.md"], "expected_insufficient": false, "human_reviewed": false}
+{"id": "fx-ambiguous-01", "category": "ambiguous", "question": "What is the limit?", "expected_sources": [], "human_reviewed": false}
+{"id": "fx-insufficient-01", "category": "insufficient_evidence", "question": "What is the policy on bringing pet dogs to the office?", "expected_sources": [], "expected_insufficient": true, "human_reviewed": false}
+{"id": "fx-conflict-01", "category": "conflicting", "question": "How many days per week may IT department staff work remotely?", "expected_sources": ["it/remote-work-policy.md", "hr/remote-work-policy.md"], "expected_insufficient": false, "human_reviewed": false}

@@ -1,0 +1,6 @@
+// Template for evaluating the REAL ePolicies corpus. Copy to eval/epolicies_eval.jsonl and replace the
+// example line with real cases. Write expected_sources / reference_answer only after reading the source
+// documents; set human_reviewed=true once a person has checked the case. Do not invent policy facts.
+// Suggested categories: direct_fact, exact_terminology, policy_identifier, table, multi_section,
+// multi_document, ambiguous, insufficient_evidence, conflicting.
+{"id": "real-001", "category": "direct_fact", "question": "<question written from a real policy document>", "expected_sources": ["<relative/path/of/the/source.md>"], "expected_insufficient": false, "reference_answer": "<optional, copied/paraphrased from the source>", "human_reviewed": false}

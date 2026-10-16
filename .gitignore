@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+frontend/.env.local
+
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+*.tsbuildinfo
+
+# Knowledge base content and generated artifacts (internal policy text)
+data/markdown/*
+!data/markdown/.gitkeep
+artifacts/*
+!artifacts/.gitkeep
+backend/eval/results/

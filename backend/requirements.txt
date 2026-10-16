@@ -1,0 +1,10 @@
+# Runtime dependencies for the ePolicies backend (Python 3.11+).
+google-genai>=2.31,<3
+fastapi>=0.140,<1
+uvicorn[standard]>=0.50,<1
+pydantic>=2.10,<3
+pydantic-settings>=2.10,<3
+python-dotenv>=1.1,<2
+psycopg[binary,pool]>=3.2,<4
+pgvector>=0.4,<0.6
+markdown-it-py>=4.0,<5
