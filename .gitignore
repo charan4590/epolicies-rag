@@ -23,3 +23,19 @@ data/markdown/*
 artifacts/*
 !artifacts/.gitkeep
 backend/eval/results/
+
+# Company data and the ePolicies scraper project, if copied into this folder.
+# This repository is public: never commit policy content or internal scraping code.
+output/
+output_backup/
+history/
+zipfile/
+*.zip
+*.csv
+list_page.txt
+topic_page.txt
+scrape_epolicies*.py
+show_diff.py
+verify_output.py
+chunking_file.py
+chunks_files.py
