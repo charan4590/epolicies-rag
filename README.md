@@ -213,6 +213,7 @@ cd epolicies-rag/backend
 python -m app.cli discover            # prints the count (expect ≈235 for your corpus)
 python -m app.cli discover --list     # every relative path
 python -m app.cli ingest --dry-run    # new / modified / unchanged / deleted, without writing anything
+python -m app.cli check-files         # offline: parse + chunk every file (no database or key needed)
 ```
 
 **ZIP import** (safe extraction into `MARKDOWN_DIR/<subdir>`): rejects absolute paths, `..` traversal,

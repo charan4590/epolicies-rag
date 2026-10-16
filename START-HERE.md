@@ -63,6 +63,12 @@ It writes `epolicies-rag/.env`, creates the tables, tests everything, and offers
 
 ## 5. Check and index
 
+Before you have the key or a database you can already check your files (offline, writes nothing):
+
+```
+python -m app.cli check-files     # read + chunk every .md file; lists broken, empty or duplicate files
+```
+
 ```
 python -m app.cli doctor          # every line should say [ OK ]
 python -m app.cli ingest          # reads, chunks and embeds all .md files (safe to re-run)

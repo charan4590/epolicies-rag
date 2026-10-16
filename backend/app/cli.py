@@ -61,6 +61,85 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check_files(args: argparse.Namespace) -> int:
+    """Read, parse and chunk every file exactly as ingestion would, but offline:
+    no database, no Gemini key, nothing is written."""
+    import math
+    from collections import defaultdict
+
+    from app.ingestion.chunker import chunk_document
+    from app.ingestion.markdown_loader import DocumentReadError, discover_markdown_files, load_document
+    from app.ingestion.markdown_parser import parse_markdown
+
+    settings = get_settings()
+    root = settings.resolved_markdown_dir
+    files = discover_markdown_files(root)
+    print(f"MARKDOWN_DIR: {root}\nDiscovered {len(files)} Markdown file(s). Checking each one (offline)...\n")
+    failed: list[tuple[str, str]] = []
+    empty: list[str] = []
+    warnings: list[str] = []
+    by_hash: dict[str, list[str]] = defaultdict(list)
+    per_doc: list[tuple[str, int, int]] = []  # path, chunks, tables
+    unique_chunks: set[str] = set()
+    token_counts: list[int] = []
+    no_headings: list[str] = []
+    for source in files:
+        try:
+            doc = load_document(source, settings.max_markdown_file_bytes)
+            parsed = parse_markdown(doc.text, source.relative_path)
+            chunks = chunk_document(parsed, source.document_id, chunk_size=settings.chunk_size,
+                                    chunk_overlap=settings.chunk_overlap, min_chunk_tokens=settings.min_chunk_tokens)
+        except DocumentReadError as exc:
+            failed.append((source.relative_path, str(exc)))
+            continue
+        except Exception as exc:  # noqa: BLE001 - report every problem, keep going
+            failed.append((source.relative_path, f"could not parse/chunk: {type(exc).__name__}: {exc}"))
+            continue
+        warnings.extend(f"{source.relative_path}: {w}" for w in doc.warnings)
+        if not chunks:
+            empty.append(source.relative_path)
+            continue
+        if not parsed.headings:
+            no_headings.append(source.relative_path)
+        by_hash[doc.content_hash].append(source.relative_path)
+        per_doc.append((source.relative_path, len(chunks), sum(1 for c in chunks if c.metadata.get("has_table"))))
+        for chunk in chunks:
+            unique_chunks.add(chunk.content_hash)
+            token_counts.append(chunk.token_count)
+
+    duplicates = [paths for paths in by_hash.values() if len(paths) > 1]
+    total_chunks = len(token_counts)
+    print(f"Readable documents      : {len(files) - len(failed)}")
+    print(f"Failed                  : {len(failed)}")
+    print(f"Empty (no content)      : {len(empty)}")
+    print(f"Duplicate-content groups: {len(duplicates)} ({sum(len(d) for d in duplicates)} files)")
+    print(f"Encoding warnings       : {len(warnings)}")
+    print(f"Documents without headings: {len(no_headings)}")
+    print(f"Chunks                  : {total_chunks} ({len(unique_chunks)} unique texts to embed)")
+    if token_counts:
+        token_counts.sort()
+        print(f"Chunk size (approx tokens): min {token_counts[0]}, median {token_counts[len(token_counts) // 2]}, "
+              f"max {token_counts[-1]}")
+        print(f"Chunks containing tables: {sum(t for _, _, t in per_doc)}")
+        requests = math.ceil(len(unique_chunks) / settings.embedding_batch_size)
+        print(f"Embedding API requests needed for a first ingestion: ~{requests} "
+              f"(batch size {settings.embedding_batch_size}); re-runs only embed changed text.")
+        print("\nLargest documents (by chunks):")
+        for path, n, tables in sorted(per_doc, key=lambda x: -x[1])[:5]:
+            print(f"  {n:4} chunks ({tables} with tables)  {path}")
+    for label, items in (("Failed", [f"{p} — {e}" for p, e in failed]), ("Empty", empty),
+                         ("Duplicate content", [" = ".join(d) for d in duplicates]),
+                         ("Encoding warnings", warnings)):
+        if items:
+            print(f"\n{label}:")
+            for item in items[: (None if args.all else 15)]:
+                print(f"  - {item}")
+            if not args.all and len(items) > 15:
+                print(f"  ... {len(items) - 15} more (use --all)")
+    print("\nNothing was written. When the database and Gemini key are ready, run `python -m app.cli ingest`.")
+    return 0 if not failed else 2
+
+
 def cmd_import_zip(args: argparse.Namespace) -> int:
     from app.ingestion.markdown_loader import import_zip
 
@@ -306,6 +385,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("init-db", cmd_init_db, "Enable pgvector and create tables/indexes (idempotent)")
     p = add("discover", cmd_discover, "Count (and optionally list) Markdown files in MARKDOWN_DIR")
     p.add_argument("--list", action="store_true")
+    add("check-files", cmd_check_files, "Offline check: read, parse and chunk every Markdown file "
+        "(no database or Gemini key needed)").add_argument("--all", action="store_true", help="list every problem")
     p = add("import-zip", cmd_import_zip, "Safely extract Markdown files from a ZIP into MARKDOWN_DIR/<subdir>")
     p.add_argument("zip_path")
     p.add_argument("--subdir", help="destination sub-directory name (default: ZIP file name)")
