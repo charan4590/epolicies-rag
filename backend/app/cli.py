@@ -366,8 +366,10 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging("WARNING" if args.command != "serve" else settings.log_level, "text")
     try:
         return args.func(args)
-    except KeyboardInterrupt:
-        return _fail("interrupted — re-run `python -m app.cli resume` to continue", 130)
+    except (KeyboardInterrupt, EOFError):
+        if args.command in {"ingest", "resume", "rebuild"}:
+            return _fail("interrupted — re-run `python -m app.cli resume` to continue (finished work is kept)", 130)
+        return _fail(f"cancelled (Ctrl+C or end of input) — run `python -m app.cli {args.command}` again", 130)
     except ConfigurationError as exc:
         return _fail(str(exc))
     except Exception as exc:  # noqa: BLE001 - CLI shows a concise, actionable message

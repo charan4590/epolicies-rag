@@ -285,7 +285,7 @@ def _create_database_if_missing(url: str, database: str) -> bool:
 def run_setup() -> int:
     from app.database.connection import close_pool
 
-    print("== ePolicies setup ==")
+    print("== ePolicies setup ==", flush=True)
     print("This writes epolicies-rag/.env. Press Enter to accept the value in [brackets].\n")
 
     # 1. Markdown folder
@@ -322,7 +322,10 @@ def run_setup() -> int:
             gemini["GOOGLE_APPLICATION_CREDENTIALS"] = clean_path_input(creds).resolve().as_posix()
     else:
         gemini["GOOGLE_GENAI_USE_VERTEXAI"] = "false"
-        gemini["GOOGLE_API_KEY"] = _ask("  GOOGLE_API_KEY (input is hidden)", secret=True)
+        key = getpass.getpass("  GOOGLE_API_KEY (input is hidden; press Enter to skip if you don't have it yet): ")
+        gemini["GOOGLE_API_KEY"] = key.strip()
+        if not key.strip():
+            print("  Skipped. Run `python -m app.cli setup` again when you have the key.")
     model = _ask("  Generation model for answers (GEMINI_MODEL)", "gemini-3.5-flash")
 
     # 3. PostgreSQL
