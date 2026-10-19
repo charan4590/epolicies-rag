@@ -220,6 +220,10 @@ def run_doctor(*, skip_gemini: bool = False) -> int:
     settings = get_settings()
     folder = settings.resolved_markdown_dir
     print(f"\n-- Markdown files --\n       MARKDOWN_DIR = {folder}")
+    for name in ("MARKDOWN_DIR", "DATABASE_URL", "GOOGLE_API_KEY", "GEMINI_MODEL", "GOOGLE_GENAI_USE_VERTEXAI"):
+        if name in os.environ:
+            report.warn(f"{name} is set in this terminal and OVERRIDES the value in .env",
+                        f"PowerShell: Remove-Item Env:{name}   (or open a new terminal)")
     try:
         count, sample = count_markdown(folder)
         if count == 0:
