@@ -28,11 +28,10 @@ def _configure(conn: psycopg.Connection, statement_timeout_ms: int) -> None:
 
     try:
         register_vector(conn)
-    except psycopg.ProgrammingError as exc:  # extension not created in this database
-        raise DatabaseUnavailableError(
-            "The pgvector extension is not enabled in this database. "
-            "Run `python -m app.cli init-db` (pgvector must be installed on the server)."
-        ) from exc
+    except psycopg.ProgrammingError:
+        # No pgvector type in this database: the array fallback (VECTOR_BACKEND=array) is in use,
+        # or init-db has not been run yet. Embeddings are then plain real[] values.
+        conn.rollback()
     conn.execute(f"SET statement_timeout = {int(statement_timeout_ms)}")
     conn.commit()
 

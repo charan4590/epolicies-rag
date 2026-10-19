@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     db_pool_min_size: int = 1
     db_pool_max_size: int = 10
     db_statement_timeout_ms: int = 30_000
+    # auto = use pgvector when the extension is installed on the server, otherwise store embeddings as
+    # real[] and compute cosine similarity in the app (fine for a few thousand chunks).
+    vector_backend: str = Field(default="auto", description="auto | pgvector | array")
 
     # --- Paths ----------------------------------------------------------------
     markdown_dir: Path = Path("./data/markdown")
@@ -154,6 +157,14 @@ class Settings(BaseSettings):
         value = value.strip().upper()
         if value not in {"MINIMAL", "LOW", "MEDIUM", "HIGH"}:
             raise ValueError("GEMINI_THINKING_LEVEL must be one of: minimal, low, medium, high")
+        return value
+
+    @field_validator("vector_backend")
+    @classmethod
+    def _check_vector_backend(cls, value: str) -> str:
+        value = value.lower().strip()
+        if value not in {"auto", "pgvector", "array"}:
+            raise ValueError("VECTOR_BACKEND must be one of: auto, pgvector, array")
         return value
 
     @field_validator("planner_mode")

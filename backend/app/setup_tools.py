@@ -96,7 +96,7 @@ def check_database(report: Report) -> bool:
     import psycopg
 
     from app.database.connection import DatabaseUnavailableError, raw_connect
-    from app.database.schema import existing_vector_dimensions, pgvector_available
+    from app.database.schema import existing_vector_backend, existing_vector_dimensions, pgvector_available
 
     settings = get_settings()
     print(f"       DATABASE_URL = {mask_database_url(settings.database_url.get_secret_value())}")
@@ -104,17 +104,25 @@ def check_database(report: Report) -> bool:
         with raw_connect(settings) as conn:
             version = conn.execute("SHOW server_version").fetchone()["server_version"]
             report.ok(f"Connected to PostgreSQL {version}")
-            if not pgvector_available(conn):
-                report.fail("pgvector is NOT installed on this PostgreSQL server",
-                            "install pgvector for this server version (see START-HERE.md), or use Docker: "
-                            "`docker compose up -d db`, or ask IT to install it")
-                return False
+            backend = existing_vector_backend(conn)
+            available = pgvector_available(conn)
             ext = conn.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'").fetchone()
-            if ext is None:
-                report.warn("pgvector is installed but not enabled in this database yet",
-                            "run `python -m app.cli init-db`")
-                return True
-            report.ok(f"pgvector {ext['extversion']} enabled")
+            if backend == "pgvector" or (backend is None and available and settings.vector_backend != "array"):
+                if ext is None:
+                    report.warn("pgvector is installed but not enabled in this database yet",
+                                "run `python -m app.cli init-db`")
+                    return True
+                report.ok(f"pgvector {ext['extversion']} enabled")
+            elif settings.vector_backend == "pgvector":
+                report.fail("pgvector is NOT installed on this PostgreSQL server (VECTOR_BACKEND=pgvector)",
+                            "ask IT to install pgvector, use Docker (`docker compose up -d db`), "
+                            "or set VECTOR_BACKEND=auto to use the built-in fallback")
+                return False
+            else:
+                report.warn("pgvector is not installed: using the built-in array fallback "
+                            "(embeddings stored in PostgreSQL as real[]; similarity computed by the app)",
+                            "fine for a few thousand chunks; ask IT to install pgvector for best performance, "
+                            "then run `python -m app.cli rebuild --confirm`")
             dims = existing_vector_dimensions(conn)
             if dims is None:
                 report.warn("Tables not created yet", "run `python -m app.cli init-db`")
@@ -364,7 +372,8 @@ def run_setup() -> int:
 
     try:
         info = init_schema()
-        print(f"  Database ready: pgvector {info['pgvector_version']}, {info['embedding_dimensions']}-dim vectors.")
+        mode = f"pgvector {info['pgvector_version']}" if info["vector_backend"] == "pgvector" else "array fallback (no pgvector)"
+        print(f"  Database ready: {mode}, {info['embedding_dimensions']}-dim vectors.")
     except DatabaseUnavailableError as exc:
         print(f"  Database not ready yet: {exc}")
     except Exception as exc:  # noqa: BLE001

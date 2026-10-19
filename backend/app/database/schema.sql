@@ -1,13 +1,11 @@
 -- ePolicies PostgreSQL schema (idempotent).
 --
--- `__EMBEDDING_DIMENSIONS__` is substituted by app/database/schema.py with the
--- validated EMBEDDING_DIMENSIONS setting.  Changing the dimension of an
--- existing database requires `python -m app.cli rebuild --confirm`.
---
--- pgvector must already be installed on the PostgreSQL *server*; this script
--- only enables the extension inside the current database.
-
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Placeholders substituted by app/database/schema.py:
+--   __EMBEDDING_DIMENSIONS__  the validated EMBEDDING_DIMENSIONS setting
+--   __VECTOR_TYPE__           `vector(N)` when pgvector is available (preferred), otherwise
+--                             `real[] CHECK (cardinality(embedding) = N)` (VECTOR_BACKEND=array fallback)
+-- Changing the dimension or vector backend of an existing database requires
+-- `python -m app.cli rebuild --confirm`. The pgvector extension itself is enabled by schema.py.
 
 CREATE TABLE IF NOT EXISTS schema_meta (
     key         text PRIMARY KEY,
@@ -53,7 +51,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     content_hash      text NOT NULL,       -- sha256 of the exact text sent to the embedding model
     token_count       integer NOT NULL CHECK (token_count > 0),
     char_count        integer NOT NULL CHECK (char_count > 0),
-    embedding         vector(__EMBEDDING_DIMENSIONS__) NOT NULL,
+    embedding         __VECTOR_TYPE__ NOT NULL,
     embedding_model   text NOT NULL,
     embedding_config  text NOT NULL,
     search_tsv        tsvector NOT NULL,
@@ -72,7 +70,7 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
     embedding_config  text NOT NULL,
     embedding_model   text NOT NULL,
     dimensions        integer NOT NULL CHECK (dimensions = __EMBEDDING_DIMENSIONS__),
-    embedding         vector(__EMBEDDING_DIMENSIONS__) NOT NULL,
+    embedding         __VECTOR_TYPE__ NOT NULL,
     created_at        timestamptz NOT NULL DEFAULT now(),
     last_used_at      timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (content_hash, embedding_config)

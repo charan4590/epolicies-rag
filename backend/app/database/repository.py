@@ -26,6 +26,16 @@ def vector_to_list(value: Any) -> list[float]:
     return [float(x) for x in value]
 
 
+def uses_pgvector(conn: psycopg.Connection) -> bool:
+    """True when the pgvector type is registered on this connection (pgvector backend)."""
+    return conn.adapters.types.get("vector") is not None
+
+
+def embedding_param(conn: psycopg.Connection, values: list[float]):
+    """Bind an embedding as pgvector `vector` or, in the array fallback, as a float array."""
+    return Vector(values) if uses_pgvector(conn) else [float(v) for v in values]
+
+
 @dataclass
 class ChunkRecord:
     """A chunk ready to be written: everything except the DB-computed tsvector."""
@@ -144,7 +154,7 @@ def replace_document(
                     "content_hash": c.content_hash,
                     "token_count": c.token_count,
                     "char_count": c.char_count,
-                    "embedding": Vector(c.embedding),
+                    "embedding": embedding_param(conn, c.embedding),
                     "embedding_model": c.embedding_model,
                     "embedding_config": c.embedding_config,
                     "cfg": text_search_config,
@@ -320,7 +330,7 @@ def put_cached_embeddings(
             "cfg": embedding_config,
             "model": embedding_model,
             "dims": dimensions,
-            "emb": Vector(v),
+            "emb": embedding_param(conn, v),
         }
         for h, v in items
     ]

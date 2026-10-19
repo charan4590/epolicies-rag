@@ -182,6 +182,11 @@ curl http://localhost:8000/health   # after starting the API: database.ok / pgve
 
 If you are not a superuser, ask an administrator to run `CREATE EXTENSION vector;` once in the database.
 
+**No pgvector on the server?** With `VECTOR_BACKEND=auto` (default) `init-db` falls back to storing
+embeddings as `real[]` in PostgreSQL and computing cosine similarity in the app. Everything else
+(full-text search, RRF, agent loop, citations, JSONL) is unchanged, and it is fast enough for a few
+thousand chunks. When pgvector is installed later, run `python -m app.cli rebuild --confirm` to switch.
+
 ## D. Frontend installation
 
 ```bash
@@ -422,6 +427,7 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | `EMBEDDING_BATCH_SIZE` / `EMBEDDING_REQUESTS_PER_MINUTE` / `EMBEDDING_MAX_RETRIES` | 50 / 60 / 5 | Embedding throughput and retry limits |
 | `EMBEDDING_MAX_DOCUMENTS_PER_RUN` | unset | Optional cost cap per ingestion run |
 | `DATABASE_URL` / `DB_STATEMENT_TIMEOUT_MS` | — / 30000 | PostgreSQL connection |
+| `VECTOR_BACKEND` | `auto` | `pgvector`, `array` (no extension needed), or `auto` (pgvector if installed) |
 | `MARKDOWN_DIR` / `EMBEDDING_JSONL_PATH` / `MAX_MARKDOWN_FILE_BYTES` | `./data/markdown` / `./artifacts/embedding.jsonl` / 5 MB | Paths and file limit |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` / `MIN_CHUNK_TOKENS` | 512 / 64 / 25 | Approximate tokens (≈4 chars/token) |
 | `TOP_K_VECTOR` / `TOP_K_KEYWORD` / `TOP_K_EXACT` / `TOP_K_FINAL` / `RRF_K` | 20 / 20 / 10 / 8 / 60 | Retrieval sizes and RRF constant |
