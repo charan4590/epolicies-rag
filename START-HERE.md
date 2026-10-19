@@ -3,6 +3,19 @@
 You need: your policy `.md` folder, a Google API key (with access to `gemini-embedding-001` and a
 generation model such as `gemini-3.5-flash`), and about 30 minutes. Full details: [README.md](README.md).
 
+## Windows quick start (no typing)
+
+1. Install **Python 3.12** from python.org (tick **"Add python.exe to PATH"**).
+2. Download this project: GitHub page -> green **Code** button -> **Download ZIP**.
+3. Right-click the ZIP -> **Extract All...** -> type `C:\` as the destination -> **Extract**.
+   You now have `C:\epolicies-rag-main` (with `backend`, `frontend`, `setup-windows.bat` inside).
+4. Copy your policy folder (the one with the `.md` files) into `C:\epolicies-rag-main` and make sure it is
+   named **`output`** -> `C:\epolicies-rag-main\output`.
+5. Double-click **`setup-windows.bat`** in `C:\epolicies-rag-main`.
+   It installs everything and checks all your files. Take a photo of the result.
+
+The steps below explain the same thing in more detail (and the database / Gemini key parts).
+
 ## 1. Install the tools (once)
 
 | | Windows | Mac |
