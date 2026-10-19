@@ -150,8 +150,11 @@ def check_gemini(report: Report) -> None:
             report.fail("GOOGLE_CLOUD_PROJECT is not set", "add GOOGLE_CLOUD_PROJECT=<project id> to epolicies-rag/.env")
             return
         creds = settings.google_application_credentials
-        report.ok("Credentials: " + (f"service-account file {creds}" if creds else
-                                     "Application Default Credentials (gcloud login)"))
+        if not settings.google_cloud_project:
+            report.ok("Credentials: Vertex AI express-mode API key")
+        else:
+            report.ok("Credentials: " + (f"service-account file {creds}" if creds else
+                                         "Application Default Credentials (gcloud login)"))
     else:
         key = settings.google_api_key.get_secret_value().strip() if settings.google_api_key else ""
         if not key:

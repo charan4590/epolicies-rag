@@ -193,7 +193,7 @@ def test_vertex_settings_and_client(monkeypatch, tmp_path):
 
     from app.config import ConfigurationError
     with pytest.raises(ConfigurationError, match="GOOGLE_CLOUD_PROJECT"):
-        gemini_module.make_client(Settings(_env_file=None, google_genai_use_vertexai=True))
+        gemini_module.make_client(Settings(_env_file=None, google_genai_use_vertexai=True, google_api_key=None))
     missing = Settings(_env_file=None, google_genai_use_vertexai=True, google_cloud_project="p",
                        google_application_credentials=str(tmp_path / "nope.json"))
     monkeypatch.undo()
@@ -219,3 +219,17 @@ def test_google_auth_errors_are_auth_errors():
 
     assert isinstance(classify_error(auth_exceptions.RefreshError("expired")), GeminiAuthError)
     assert isinstance(classify_error(auth_exceptions.DefaultCredentialsError("none")), GeminiAuthError)
+
+
+def test_vertex_express_mode_and_auth_message(monkeypatch):
+    from app.llm import gemini as gemini_module
+
+    captured = {}
+    monkeypatch.setattr(gemini_module.genai, "Client", lambda **kw: captured.update(kw) or SimpleNamespace())
+    express = Settings(_env_file=None, google_genai_use_vertexai=True, google_api_key="vertex-key")
+    assert express.gemini_configured
+    gemini_module.make_client(express)
+    assert captured["vertexai"] is True and captured["api_key"] == "vertex-key" and "project" not in captured
+    err = classify_error(api_error(401, "UNAUTHENTICATED", "API keys are not supported by this API. Expected OAuth2"))
+    assert isinstance(err, GeminiAuthError)
+    assert "Google says: API keys are not supported" in str(err) and "GOOGLE_GENAI_USE_VERTEXAI=true" in str(err)

@@ -69,9 +69,13 @@ def classify_error(exc: BaseException) -> GeminiError:
         message = str(getattr(exc, "message", "") or "")
         lowered = message.lower()
         if code in (401, 403) or "api key not valid" in lowered or ("permission" in lowered and code == 400):
+            hint = ""
+            if "oauth" in lowered or "api keys are not supported" in lowered:
+                hint = (" This looks like a Vertex AI key or project: set GOOGLE_GENAI_USE_VERTEXAI=true "
+                        "in .env (with GOOGLE_CLOUD_PROJECT, or the key alone for Vertex AI express mode).")
             return GeminiAuthError(
                 "Gemini rejected the credentials (check GOOGLE_API_KEY and that the Generative "
-                f"Language API is enabled). HTTP {code} {status}."
+                f"Language API is enabled). HTTP {code} {status}. Google says: {message[:300]}{hint}"
             )
         if code == 429 or status == "RESOURCE_EXHAUSTED":
             return GeminiQuotaError(f"Gemini rate limit or quota exceeded (HTTP 429). {message[:200]}")
@@ -163,6 +167,11 @@ def make_client(settings: Settings | None = None) -> genai.Client:
     is the single, bounded retry policy."""
     settings = settings or get_settings()
     http_options = types.HttpOptions(timeout=int(settings.gemini_timeout_seconds * 1000))
+    if settings.google_genai_use_vertexai and not settings.google_cloud_project and settings.google_api_key \
+            and settings.google_api_key.get_secret_value().strip():
+        # Vertex AI express mode: a Vertex API key without a project / service account.
+        return genai.Client(vertexai=True, api_key=settings.google_api_key.get_secret_value().strip(),
+                            http_options=http_options)
     if settings.google_genai_use_vertexai:
         return genai.Client(
             vertexai=True,

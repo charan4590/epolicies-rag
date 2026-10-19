@@ -202,7 +202,8 @@ class Settings(BaseSettings):
     @property
     def gemini_configured(self) -> bool:
         if self.google_genai_use_vertexai:
-            return bool(self.google_cloud_project and self.google_cloud_project.strip())
+            has_key = self.google_api_key is not None and bool(self.google_api_key.get_secret_value().strip())
+            return bool(self.google_cloud_project and self.google_cloud_project.strip()) or has_key
         return self.google_api_key is not None and bool(self.google_api_key.get_secret_value().strip())
 
     def require_gemini_key(self) -> str:
