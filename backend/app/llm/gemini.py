@@ -266,6 +266,8 @@ class GeminiLLM:
                 try:
                     return schema.model_validate_json(text)
                 except ValidationError:
+                    logger.warning("gemini_malformed_json", extra={"stage": stage, "finish_reason": reason,
+                                                                  "chars": len(text), "tail": text[-160:]})
                     last_error = GeminiResponseError(
                         f"Gemini returned malformed JSON for stage '{stage}' (finish reason: {reason})."
                     )
@@ -281,14 +283,32 @@ class GeminiLLM:
         assert last_error is not None
         raise last_error
 
-    def _generate(self, *, prompt: str, system: str, schema: type[BaseModel], max_output_tokens: int):
+    def generate_text(self, *, stage: str, system: str, prompt: str, usage: LLMUsage | None = None,
+                      max_output_tokens: int = 8192) -> str:
+        """Plain-text generation (no JSON schema). Retries once with more room if cut off."""
+        limit = max_output_tokens
+        text = ""
+        for _ in range(2):
+            response = self._generate(prompt=prompt, system=system, schema=None, max_output_tokens=limit)
+            if usage is not None:
+                usage.record(stage, getattr(response, "usage_metadata", None))
+            text = (getattr(response, "text", None) or "").strip()
+            if text and "MAX_TOKENS" not in _finish_reason(response):
+                return text
+            limit = min(limit * 2, 32768)
+        if not text:
+            raise GeminiResponseError(f"Gemini returned no content for stage '{stage}'.")
+        return text
+
+    def _generate(self, *, prompt: str, system: str, schema: type[BaseModel] | None, max_output_tokens: int):
         config_kwargs: dict[str, Any] = {
             "system_instruction": system,
             "temperature": self.settings.gemini_temperature,
-            "response_mime_type": "application/json",
-            "response_schema": schema,
             "max_output_tokens": max_output_tokens,
         }
+        if schema is not None:
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_schema"] = schema
         if self.settings.gemini_thinking_level is not None:
             config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=self.settings.gemini_thinking_level)
         elif self.settings.gemini_thinking_budget is not None:

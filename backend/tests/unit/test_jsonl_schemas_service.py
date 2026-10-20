@@ -237,3 +237,31 @@ def test_strict_grounding_withholds_uncited_general_knowledge(service, monkeypat
     assert response.answer == NO_EVIDENCE_REPLY
     assert response.insufficient_evidence and response.citations == []
     assert "80%" not in response.answer
+
+
+def test_plain_text_fallback_when_json_fails(service, monkeypatch):
+    from app.llm.gemini import GeminiResponseError
+
+    chunks = [rc("t", "Hotel costs are reimbursed up to $250 per night.", "Travel Policy")]
+    service.lookup_rows["t"] = {"document_id": "doc_t", "status": "indexed"}
+    monkeypatch.setattr(RetrievalAgent, "run", lambda *a, **k: RetrievalOutcome(
+        chunks=chunks, all_retrieved_ids={"t"}, stop_reason="sufficient_evidence"))
+    service.llm.handlers.update({
+        "answer": GeminiResponseError("Gemini returned malformed JSON for stage 'answer' (finish reason: MAX_TOKENS)."),
+        "answer_text": "Hotel costs are reimbursed up to $250 per night [S1].",
+    })
+    response = service.answer(ChatRequest(question="What is the hotel cap?", persist=False))
+    assert service.llm.stages() == ["answer", "answer_text"]
+    assert response.answer == "Hotel costs are reimbursed up to $250 per night [S1]."
+    assert response.citations[0].chunk_id == "t" and response.verification.status == "verified"
+
+
+def test_answer_from_markdown_parses_flags():
+    from app.agents.answer_generator import answer_from_markdown
+
+    a = answer_from_markdown("INSUFFICIENT EVIDENCE: no pet policy found\nNothing in the sources covers pets.", {"S1"})
+    assert a.insufficient_evidence and a.missing_information == ["no pet policy found"] and a.claims == []
+    b = answer_from_markdown("HR allows 3 days [S1]. IT allows 2 days [S2].\nCONFLICT: HR and IT differ [S1][S2]",
+                             {"S1", "S2"})
+    assert [c.source_ids for c in b.claims] == [["S1"], ["S2"]]
+    assert b.conflicts[0].source_ids == ["S1", "S2"] and "CONFLICT" not in b.answer_markdown

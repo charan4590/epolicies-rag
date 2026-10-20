@@ -85,6 +85,16 @@ class FakeLLM:
         data = handler(prompt) if callable(handler) else handler
         return schema.model_validate(data)
 
+    def generate_text(self, *, stage: str, system: str, prompt: str, usage: LLMUsage | None = None,
+                      max_output_tokens: int = 8192) -> str:
+        self.calls.append({"stage": stage, "prompt": prompt, "system": system})
+        if usage is not None:
+            usage.record(stage, None)
+        handler = self.handlers.get(stage)
+        if handler is None:
+            raise AssertionError(f"FakeLLM has no handler for stage '{stage}'")
+        return handler(prompt) if callable(handler) else handler
+
     def stages(self) -> list[str]:
         return [c["stage"] for c in self.calls]
 
