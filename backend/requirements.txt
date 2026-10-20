@@ -8,3 +8,5 @@ python-dotenv>=1.1,<2
 psycopg[binary,pool]>=3.2,<4
 pgvector>=0.4,<0.6
 markdown-it-py>=4.0,<5
+# Fast in-app cosine similarity when the pgvector extension is not installed (VECTOR_BACKEND=array).
+numpy>=1.26,<3

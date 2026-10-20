@@ -4,7 +4,8 @@ With pgvector (preferred) the database ranks chunks with ``<=>`` over an HNSW
 index. Without pgvector (VECTOR_BACKEND=array) embeddings are stored as
 ``real[]`` in PostgreSQL and cosine similarity is computed here; the
 embeddings are cached in memory and reloaded whenever the chunk table changes.
-For a few thousand chunks this takes well under a second per query.
+With numpy installed (default) a search over ~10,000 chunks takes a few
+milliseconds; without numpy a pure-Python loop is used (slower, same results).
 """
 
 from __future__ import annotations
@@ -17,6 +18,11 @@ from collections.abc import Sequence
 
 import psycopg
 from pgvector import Vector
+
+try:  # numpy makes the array fallback fast; pure Python is used if it is missing
+    import numpy as np
+except ImportError:  # pragma: no cover - numpy is in requirements.txt
+    np = None
 
 from app.database.repository import uses_pgvector, vector_to_list
 from app.retrieval.types import CHUNK_COLUMNS, RetrievedChunk
@@ -63,6 +69,7 @@ class _EmbeddingMatrix:
         self.ids: list[str] = []
         self.vectors: list[list[float]] = []
         self.norms: list[float] = []
+        self.matrix = None  # numpy (n, d) float32 array of unit-normalised rows
         self.lock = threading.Lock()
 
 
@@ -96,7 +103,13 @@ def _load_matrix(conn: psycopg.Connection) -> _EmbeddingMatrix:
             ids.append(row["chunk_id"])
             vectors.append(vector)
             norms.append(norm)
-        _matrix.ids, _matrix.vectors, _matrix.norms, _matrix.signature = ids, vectors, norms, signature
+        if np is not None and vectors:
+            matrix = np.asarray(vectors, dtype=np.float32)
+            matrix /= np.asarray(norms, dtype=np.float32)[:, None]
+            _matrix.matrix, _matrix.vectors, _matrix.norms = matrix, [], []
+        else:
+            _matrix.matrix, _matrix.vectors, _matrix.norms = None, vectors, norms
+        _matrix.ids, _matrix.signature = ids, signature
         return _matrix
 
 
@@ -107,12 +120,19 @@ def _array_vector_search(conn: psycopg.Connection, query_embedding: Sequence[flo
     if query_norm == 0:
         return []
     matrix = _load_matrix(conn)
-    mul = operator.mul
-    scored = (
-        (sum(map(mul, vector, query)) / (norm * query_norm), chunk_id)
-        for chunk_id, vector, norm in zip(matrix.ids, matrix.vectors, matrix.norms)
-    )
-    best = heapq.nlargest(top_k, scored, key=lambda item: (item[0], item[1]))
+    if matrix.matrix is not None:
+        scores = matrix.matrix @ (np.asarray(query, dtype=np.float32) / np.float32(query_norm))
+        k = min(top_k, len(scores))
+        top = np.argpartition(-scores, k - 1)[:k] if k else []
+        best = sorted(((float(scores[i]), matrix.ids[i]) for i in top), key=lambda item: (item[0], item[1]),
+                      reverse=True)
+    else:
+        mul = operator.mul
+        scored = (
+            (sum(map(mul, vector, query)) / (norm * query_norm), chunk_id)
+            for chunk_id, vector, norm in zip(matrix.ids, matrix.vectors, matrix.norms)
+        )
+        best = heapq.nlargest(top_k, scored, key=lambda item: (item[0], item[1]))
     if not best:
         return []
     similarity = {chunk_id: score for score, chunk_id in best}
