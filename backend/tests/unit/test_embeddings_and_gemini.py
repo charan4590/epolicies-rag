@@ -233,3 +233,38 @@ def test_vertex_express_mode_and_auth_message(monkeypatch):
     err = classify_error(api_error(401, "UNAUTHENTICATED", "API keys are not supported by this API. Expected OAuth2"))
     assert isinstance(err, GeminiAuthError)
     assert "Google says: API keys are not supported" in str(err) and "GOOGLE_GENAI_USE_VERTEXAI=true" in str(err)
+
+
+def test_generate_json_retries_when_output_is_truncated():
+    from pydantic import BaseModel
+
+    from app.llm.gemini import GeminiLLM, GeminiResponseError, LLMUsage
+
+    class Out(BaseModel):
+        answer: str
+
+    calls = []
+
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            calls.append(config.max_output_tokens)
+            if len(calls) == 1:  # first answer cut off mid-JSON
+                return SimpleNamespace(parsed=None, text='{"answer": "abc', usage_metadata=None,
+                                       candidates=[SimpleNamespace(finish_reason="FinishReason.MAX_TOKENS")])
+            return SimpleNamespace(parsed=None, text='{"answer": "complete"}', usage_metadata=None,
+                                   candidates=[SimpleNamespace(finish_reason="FinishReason.STOP")])
+
+    llm = GeminiLLM(Settings(_env_file=None, gemini_model="m"), client=SimpleNamespace(models=Models()))
+    usage = LLMUsage()
+    assert llm.generate_json(stage="answer", system="s", prompt="p", schema=Out, usage=usage,
+                             max_output_tokens=1000).answer == "complete"
+    assert calls == [1000, 2000] and usage.calls == 2
+
+    class Broken:
+        def generate_content(self, *, model, contents, config):
+            return SimpleNamespace(parsed=None, text="not json", usage_metadata=None,
+                                   candidates=[SimpleNamespace(finish_reason="FinishReason.STOP")])
+
+    llm = GeminiLLM(Settings(_env_file=None, gemini_model="m"), client=SimpleNamespace(models=Broken()))
+    with pytest.raises(GeminiResponseError, match="finish reason: FinishReason.STOP"):
+        llm.generate_json(stage="answer", system="s", prompt="p", schema=Out)

@@ -249,6 +249,39 @@ class GeminiLLM:
         usage: LLMUsage | None = None,
         max_output_tokens: int = 4096,
     ) -> M:
+        # Thinking models count their reasoning tokens against max_output_tokens, which can cut the JSON
+        # answer off. If that happens the call is retried (bounded) with a larger output allowance.
+        limit = max_output_tokens
+        last_error: GeminiResponseError | None = None
+        for attempt in range(3):
+            response = self._generate(prompt=prompt, system=system, schema=schema, max_output_tokens=limit)
+            if usage is not None:
+                usage.record(stage, getattr(response, "usage_metadata", None))
+            parsed = getattr(response, "parsed", None)
+            if isinstance(parsed, schema):
+                return parsed
+            reason = _finish_reason(response)
+            text = getattr(response, "text", None)
+            if text:
+                try:
+                    return schema.model_validate_json(text)
+                except ValidationError:
+                    last_error = GeminiResponseError(
+                        f"Gemini returned malformed JSON for stage '{stage}' (finish reason: {reason})."
+                    )
+            else:
+                last_error = GeminiResponseError(
+                    f"Gemini returned no content for stage '{stage}' (finish reason: {reason})."
+                )
+            truncated = "MAX_TOKENS" in reason or not text
+            if not truncated or limit >= 32768:
+                break
+            logger.warning("gemini_output_truncated", extra={"stage": stage, "attempt": attempt + 1, "limit": limit})
+            limit = min(limit * 2, 32768)
+        assert last_error is not None
+        raise last_error
+
+    def _generate(self, *, prompt: str, system: str, schema: type[BaseModel], max_output_tokens: int):
         config_kwargs: dict[str, Any] = {
             "system_instruction": system,
             "temperature": self.settings.gemini_temperature,
@@ -267,20 +300,7 @@ class GeminiLLM:
         def _call() -> types.GenerateContentResponse:
             return self._client.models.generate_content(model=self.model, contents=prompt, config=config)
 
-        response = call_with_retries(_call, max_retries=self.settings.gemini_max_retries)
-        if usage is not None:
-            usage.record(stage, getattr(response, "usage_metadata", None))
-        parsed = getattr(response, "parsed", None)
-        if isinstance(parsed, schema):
-            return parsed
-        text = getattr(response, "text", None)
-        if not text:
-            reason = _finish_reason(response)
-            raise GeminiResponseError(f"Gemini returned no content for stage '{stage}' (finish reason: {reason}).")
-        try:
-            return schema.model_validate_json(text)
-        except ValidationError as exc:
-            raise GeminiResponseError(f"Gemini returned malformed JSON for stage '{stage}'.") from exc
+        return call_with_retries(_call, max_retries=self.settings.gemini_max_retries)
 
 
 def _finish_reason(response: Any) -> str:

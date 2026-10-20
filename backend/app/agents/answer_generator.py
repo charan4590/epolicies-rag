@@ -67,5 +67,5 @@ def generate_answer(
         prompt="\n\n".join(sections),
         schema=GeneratedAnswer,
         usage=usage,
-        max_output_tokens=4096,
+        max_output_tokens=8192,
     )
