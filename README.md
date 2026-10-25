@@ -394,8 +394,7 @@ new, modified, deleted or unreadable and have not been processed yet.
 ## K. Example usage
 
 Your real documents were not available while this was built, so no questions about them are listed
-here — the welcome screen shows generic example prompts, which you can replace with questions from your
-own policies via `NEXT_PUBLIC_SUGGESTED_QUESTIONS` (separated by `|`).
+here. The welcome screen shows no suggested questions; users type their own.
 
 With the synthetic fixtures (`MARKDOWN_DIR=backend/tests/fixtures/markdown`) these were run end-to-end
 against the real Gemini API:
@@ -443,8 +442,7 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | `ENABLE_SEARCH_DEBUG` / `EXPOSE_DIAGNOSTICS` | `true` / `true` | Debug endpoint / diagnostics in chat responses |
 | `LOG_LEVEL` / `LOG_FORMAT` | `INFO` / `json` | Structured logging |
 
-Frontend (`frontend/.env.local`): `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`) and
-optional `NEXT_PUBLIC_SUGGESTED_QUESTIONS`.
+Frontend (`frontend/.env.local`): `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`).
 
 ## Project structure
 

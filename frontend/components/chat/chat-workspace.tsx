@@ -213,7 +213,7 @@ export function ChatWorkspace({ conversationId: initialId }: { conversationId?: 
             </Button>
           </div>
         ) : empty ? (
-          <Welcome onPick={(q) => void ask(q)} disabled={busy} />
+          <Welcome />
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6">
             {messages.map((message) =>

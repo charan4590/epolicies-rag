@@ -11,5 +11,5 @@ npm run check                # typecheck + lint
 npm run build
 ```
 
-Only `NEXT_PUBLIC_API_BASE_URL` (and optional `NEXT_PUBLIC_SUGGESTED_QUESTIONS`) belong in frontend env
+Only `NEXT_PUBLIC_API_BASE_URL` belongs in frontend env
 files — never API keys or database credentials.
