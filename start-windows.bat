@@ -21,11 +21,17 @@ echo === Starting ePolicies ===
 echo Project folder: %CD%
 echo.
 
-set "VPY=%CD%\backend\.venv\Scripts\python.exe"
-if not exist "%VPY%" (
-  echo [ERROR] backend\.venv was not found. Run setup-windows.bat first.
+REM Python environment: backend\.venv (made by setup-windows.bat), or .venv here, or .venv one folder up
+set "VPY="
+for %%V in ("%CD%\backend\.venv" "%CD%\.venv" "%CD%\..\.venv") do (
+  if not defined VPY if exist "%%~V\Scripts\python.exe" set "VPY=%%~fV\Scripts\python.exe"
+)
+if not defined VPY (
+  echo [ERROR] No Python environment found in backend\.venv, .venv or ..\.venv
+  echo         Run setup-windows.bat first.
   goto :fail
 )
+echo Python: %VPY%
 
 REM ---- 1. Database ----
 echo [1/5] Database
