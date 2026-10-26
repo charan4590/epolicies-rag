@@ -16,6 +16,7 @@ from app.config import Settings
 from app.ingestion.embedder import Embedder
 from app.retrieval.keyword_search import exact_search, keyword_search
 from app.retrieval.ranking import RankedList, dedupe_by_content, reciprocal_rank_fusion
+from app.retrieval.synonyms import keyword_query_with_synonyms
 from app.retrieval.types import RetrievedChunk
 from app.retrieval.vector_search import vector_search
 
@@ -137,11 +138,13 @@ def hybrid_search(
                 remember(c, query)
         if use_keyword:
             started = time.perf_counter()
-            kw = keyword_search(conn, query, top_k=settings.top_k_keyword, ts_config=settings.text_search_config,
+            kw_query = (keyword_query_with_synonyms(conn, query, file_path=settings.resolved_synonyms_path)
+                        if settings.synonym_expansion else query)
+            kw = keyword_search(conn, kw_query, top_k=settings.top_k_keyword, ts_config=settings.text_search_config,
                                 phrases=phrases)
             result.timings_ms[f"keyword_{idx}"] = round((time.perf_counter() - started) * 1000, 1)
             lists.append(RankedList(f"keyword:{idx}", [c.chunk_id for c in kw], keyword_weight))
-            result.lists[f"keyword:{query}"] = [
+            result.lists[f"keyword:{kw_query}"] = [
                 {"rank": c.keyword_rank, "chunk_id": c.chunk_id, "title": c.title, "heading_path": c.heading_path,
                  "score": round(c.keyword_score or 0.0, 4)}
                 for c in kw
@@ -163,7 +166,7 @@ def hybrid_search(
         for c in ex:
             remember(c, "")
 
-    fused = reciprocal_rank_fusion(lists, k=settings.rrf_k)
+    fused = reciprocal_rank_fusion(lists, k=settings.rrf_k, max_rank=settings.rrf_max_rank or None)
     ordered_ids = [item.chunk_id for item in fused]
     kept, dropped = dedupe_by_content(ordered_ids, {cid: pool[cid].content_hash for cid in ordered_ids})
     result.duplicates_collapsed = sum(len(v) for v in dropped.values())

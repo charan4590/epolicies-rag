@@ -33,6 +33,7 @@ function RankList({ title, items }: { title: string; items: RankedItem[] }) {
 export function DiagnosticsPanel({ diagnostics }: { diagnostics: ChatDiagnostics }) {
   const [open, setOpen] = useState(false);
   const { plan, rounds, llm_usage: usage, models, timings_ms: timings } = diagnostics;
+  const relevant = new Set(diagnostics.relevant_chunk_ids ?? []);
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="rounded-lg border border-dashed">
       <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
@@ -65,6 +66,14 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: ChatDiagnostics
             )}
             <dt className="text-muted-foreground">Stop reason</dt>
             <dd>{diagnostics.stop_reason.replaceAll("_", " ")}</dd>
+            {plan.notes.length > 0 && (
+              <>
+                <dt className="text-muted-foreground">Notes</dt>
+                <dd className="space-y-0.5">
+                  {plan.notes.map((note) => <p key={note}>{note}</p>)}
+                </dd>
+              </>
+            )}
             <dt className="text-muted-foreground">Models</dt>
             <dd>
               {models.generation} · {models.embedding} ({models.embedding_dimensions}d)
@@ -93,6 +102,11 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: ChatDiagnostics
               {round.assessment && round.assessment.missing_information.length > 0 && (
                 <p className="text-muted-foreground">Missing: {round.assessment.missing_information.join("; ")}</p>
               )}
+              {round.referenced_policies && round.referenced_policies.length > 0 && (
+                <p className="text-muted-foreground">
+                  Next round searches referenced: {round.referenced_policies.join("; ")}
+                </p>
+              )}
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {Object.entries(round.search.lists).map(([name, items]) => (
                   <RankList key={name} title={name} items={items} />
@@ -102,7 +116,11 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: ChatDiagnostics
           ))}
 
           <div>
-            <p className="mb-1 font-medium">Context passed to the answer (RRF order)</p>
+            <p className="mb-1 font-medium">Context passed to the answer</p>
+            <p className="mb-1 text-muted-foreground">
+              Passages the evidence check marked relevant (✓) come first, then the rest by RRF score. RRF only counts
+              the top ranks of each search, so a passage found low down in several searches cannot outrank a top hit.
+            </p>
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="text-muted-foreground">
@@ -112,7 +130,8 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: ChatDiagnostics
                     <th className="py-1 pr-2 font-normal">Vector</th>
                     <th className="py-1 pr-2 font-normal">Keyword</th>
                     <th className="py-1 pr-2 font-normal">Exact</th>
-                    <th className="py-1 font-normal">RRF</th>
+                    <th className="py-1 pr-2 font-normal">RRF</th>
+                    <th className="py-1 font-normal">Relevant</th>
                   </tr>
                 </thead>
                 <tbody className="font-mono">
@@ -125,7 +144,8 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: ChatDiagnostics
                       <td className="py-1 pr-2">{c.vector_rank ?? "–"}</td>
                       <td className="py-1 pr-2">{c.keyword_rank ?? "–"}</td>
                       <td className="py-1 pr-2">{c.exact_rank ?? "–"}</td>
-                      <td className="py-1">{c.rrf_score.toFixed(4)}</td>
+                      <td className="py-1 pr-2">{c.rrf_score.toFixed(4)}</td>
+                      <td className="py-1">{relevant.has(c.chunk_id) ? "✓" : ""}</td>
                     </tr>
                   ))}
                 </tbody>

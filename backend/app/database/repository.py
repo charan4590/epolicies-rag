@@ -243,6 +243,14 @@ def list_documents(
     return rows, int(total)
 
 
+def indexed_document_titles(conn: psycopg.Connection) -> list[tuple[str, str]]:
+    """(title, relative_path) of every indexed document."""
+    rows = conn.execute(
+        "SELECT title, relative_path FROM documents WHERE status = 'indexed' ORDER BY title, relative_path"
+    ).fetchall()
+    return [(row["title"], row["relative_path"]) for row in rows]
+
+
 def get_document(conn: psycopg.Connection, document_id: str) -> dict[str, Any] | None:
     doc = conn.execute(
         """

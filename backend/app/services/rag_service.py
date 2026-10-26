@@ -16,6 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.agents.answer_generator import GeneratedAnswer, generate_answer
+from app.agents.catalog import build_catalog_answer, parse_catalog_question
 from app.agents.citation_verifier import (
     MARKER_RE,
     VerificationReport,
@@ -23,12 +24,13 @@ from app.agents.citation_verifier import (
     verify_deterministic,
     verify_with_llm,
 )
-from app.agents.query_planner import QueryPlan, plan_query
+from app.agents.query_planner import QueryPlan, deterministic_plan, plan_query
 from app.agents.retrieval_agent import RetrievalAgent, RetrievalOutcome
 from app.config import Settings, get_settings
 from app.database import repository as repo
 from app.database.connection import connection
 from app.ingestion.embedder import Embedder, GeminiEmbedder
+from app.retrieval.keyword_search import unknown_terms
 from app.llm.gemini import GeminiError, GeminiLLM, LLMUsage
 from app.retrieval.types import RetrievedChunk
 from app.schemas.api_models import (
@@ -126,10 +128,26 @@ class RAGService:
             return now
 
         history = self._load_history(request)
+        catalog = self._catalog_answer(request, usage, timings, started)
+        if catalog is not None:
+            return catalog
         t = time.perf_counter()
         emit({"type": "stage", "stage": "planning", "message": "Understanding the question"})
-        plan = plan_query(request.question, history, llm=self.llm, mode=self.settings.planner_mode, usage=usage,
+        mode, misspelt = self.settings.planner_mode, []
+        if mode == "auto":
+            # Words found in no policy are usually typos; Gemini rewrites the question so that keyword
+            # search uses the corrected words (vector search tolerates typos, keyword search does not).
+            try:
+                with connection() as conn:
+                    misspelt = unknown_terms(conn, request.question, ts_config=self.settings.text_search_config)
+            except Exception:  # noqa: BLE001 - a spelling hint is optional; retrieval reports DB errors
+                logger.warning("unknown_terms_check_failed", exc_info=True)
+            mode = "always" if misspelt else mode
+        plan = plan_query(request.question, history, llm=self.llm, mode=mode, usage=usage,
                           max_queries=self.settings.max_queries_per_round)
+        if misspelt:
+            plan.notes.append("Words not found in any policy: " + ", ".join(misspelt)
+                              + " – Gemini corrected the question before searching.")
         t = mark("planning", t)
         check()
 
@@ -182,6 +200,28 @@ class RAGService:
                 notes=["The draft answer was withheld because it was not supported by any indexed document."],
             )
         return self._finish(request, plan, response, outcome, report, usage, timings, started)
+
+    # ------------------------------------------------------------------ catalog questions
+    def _catalog_answer(self, request: ChatRequest, usage: LLMUsage, timings: dict[str, float],
+                        started: float) -> ChatResponse | None:
+        """Answer "how many policies / list all policies" from the document index (no Gemini call)."""
+        parsed = parse_catalog_question(request.question)
+        if parsed is None:
+            return None
+        with connection() as conn:
+            titles = repo.indexed_document_titles(conn)
+        answer = build_catalog_answer(parsed, titles)
+        if answer is None:
+            return None
+        response = ChatResponse(
+            answer=answer, citations=[], insufficient_evidence=False,
+            verification=VerificationInfo(status="not_applicable", notes=[
+                "Answered from the list of indexed documents, not from policy text."
+            ]),
+            standalone_question=request.question,
+        )
+        return self._finish(request, deterministic_plan(request.question), response, None, None, usage, timings,
+                            started)
 
     # ------------------------------------------------------------------ verification
     def _lookup(self, chunk_ids):
@@ -306,6 +346,7 @@ class RAGService:
                 "stop_reason": outcome.stop_reason if outcome else "not_applicable",
                 "retrieved_chunks": len(outcome.all_retrieved_ids) if outcome else 0,
                 "context_chunks": [c.brief() for c in outcome.chunks] if outcome else [],
+                "relevant_chunk_ids": outcome.relevant_ids if outcome else [],
                 "verification": report.as_dict() if report else None,
                 "models": {
                     "generation": self.settings.gemini_model,

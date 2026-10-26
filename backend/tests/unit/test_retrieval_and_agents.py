@@ -112,6 +112,24 @@ def test_follow_up_is_rewritten_by_llm():
     assert "Up to 5 days" in llm.calls[0]["prompt"]  # history provided as context
 
 
+def test_misspelt_follow_up_is_searched_even_if_llm_says_not_policy():
+    # Real case: "what kind of jpoint partership was used here" was rewritten correctly but labelled
+    # not policy-related, so the assistant replied with the greeting instead of searching.
+    llm = FakeLLM({"planning": {
+        "standalone_question": "What kind of joint partnership was used by Allina Health and Aetna?",
+        "is_policy_question": False, "intent": "partnership type", "key_terms": ["joint venture"],
+        "identifiers": [], "exact_phrases": [], "search_queries": ["joint venture partnership"],
+        "retrieval_emphasis": "balanced", "needs_multiple_documents": False, "ambiguity": "",
+    }})
+    history = [{"role": "user", "content": "ghat kind venture partnership was used here"},
+               {"role": "assistant", "content": "A 50/50 joint venture [S1]."}]
+    plan = plan_query("what kind of jpoint partership was used here", history, llm=llm, mode="auto",
+                      usage=LLMUsage(), max_queries=3)
+    assert plan.is_policy_question and plan.search_queries[0].startswith("What kind of joint partnership")
+    thanks = plan_query("thanks!", history, llm=llm, mode="auto", usage=LLMUsage(), max_queries=3)
+    assert not thanks.is_policy_question
+
+
 def test_planner_falls_back_when_llm_fails():
     llm = FakeLLM({"planning": GeminiUnavailableError("down")})
     history = [{"role": "user", "content": "Tell me about remote work"}]
@@ -176,3 +194,58 @@ def test_weak_claim_detected_when_number_missing():
     _, report = verify_deterministic(answer, {"S1": s1}, {"c1"},
                                      lambda ids: {"c1": {"document_id": "d1", "status": "indexed"}})
     assert report.claims[0].status == "weak" and report.claims[0].missing_numbers == ["300"]
+
+
+def test_rrf_rank_cut_off_stops_deep_ranks_beating_a_top_hit():
+    # Real case: a chunk at vector rank 16 + keyword rank 17 (0.0261) outscored the vector #1 (0.0164).
+    fillers = [f"f{i}" for i in range(15)]
+    vector = RankedList("vector", ["answer"] + fillers + ["junk"])
+    keyword = RankedList("keyword", [f"k{i}" for i in range(16)] + ["junk"])
+    uncapped = [i.chunk_id for i in reciprocal_rank_fusion([vector, keyword], k=60)]
+    capped = reciprocal_rank_fusion([vector, keyword], k=60, max_rank=10)
+    assert uncapped[0] == "junk"
+    assert capped[0].chunk_id == "answer"
+    junk = next(i for i in capped if i.chunk_id == "junk")
+    assert junk.score == 0 and capped[-1].score == 0  # kept, but after every scored chunk
+
+
+def test_referenced_policies_are_found_in_quotes_and_links():
+    from app.agents.retrieval_agent import referenced_policies
+
+    text = ('If the provider is non-participating, refer to the "Precertification - Policy - Precertification: '
+            'Nonparticipating Provider Authorizations" policy. See also [Durable Medical Equipment (DME) - Policy]'
+            '(https://example.com/dme.html). Members said "thank you" to staff.')
+    assert referenced_policies([chunk("a", "d1", text)]) == [
+        "Precertification - Policy - Precertification: Nonparticipating Provider Authorizations",
+        "Durable Medical Equipment (DME) - Policy",
+    ]
+
+
+def test_retrieval_searches_a_referenced_policy_next(monkeypatch):
+    from app.agents.query_planner import deterministic_plan
+    from app.agents.retrieval_agent import RetrievalAgent
+    from app.config import get_settings
+    from app.retrieval.hybrid_search import SearchResult
+
+    abortion = chunk("a", "d1", 'For non-participating providers, refer to the "Nonparticipating Provider '
+                                 'Authorizations" policy.')
+    precert = chunk("p", "d2", "Non-participating providers need an authorization before services.")
+    searched: list[list[str]] = []
+
+    def fake_search(self, queries, plan, *, first_round):
+        searched.append(list(queries))
+        return SearchResult(chunks=[abortion] if first_round else [precert])
+
+    monkeypatch.setattr(RetrievalAgent, "_search", fake_search)
+    llm = FakeLLM({"evidence_check": lambda prompt: (
+        {"sufficient": True, "confidence": "high", "relevant_source_ids": ["S1", "S2"],
+         "missing_information": [], "follow_up_queries": []}
+        if "need an authorization" in prompt else
+        {"sufficient": False, "confidence": "low", "relevant_source_ids": ["S1"],
+         "missing_information": ["non-participating rules"], "follow_up_queries": []})})
+    agent = RetrievalAgent(get_settings(), embedder=None, llm=llm)
+    outcome = agent.run(deterministic_plan("Precertification for abortion?"), usage=LLMUsage(),
+                        emit=lambda e: None, check_cancel=lambda: None)
+    assert searched[1] == ["Nonparticipating Provider Authorizations"]
+    assert outcome.stop_reason == "sufficient_evidence" and {c.chunk_id for c in outcome.chunks} == {"a", "p"}
+    assert outcome.rounds[0].referenced_policies == ["Nonparticipating Provider Authorizations"]

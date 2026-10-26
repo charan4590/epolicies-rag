@@ -75,6 +75,28 @@ def keyword_search(
     return results
 
 
+def unknown_terms(conn: psycopg.Connection, text: str, *, ts_config: str = "english") -> list[str]:
+    """Question words that occur in no indexed chunk – usually spelling mistakes ("jpoint partership").
+
+    Each term is checked with the GIN full-text index, so this is fast. Stop words and terms that
+    stem to nothing are ignored.
+    """
+    terms = keyword_terms(text)
+    if not terms or conn.execute("SELECT NOT EXISTS (SELECT 1 FROM chunks) AS empty").fetchone()["empty"]:
+        return []
+    rows = conn.execute(
+        """
+        SELECT t.term FROM unnest(%(terms)s::text[]) WITH ORDINALITY AS t(term, pos)
+        WHERE numnode(plainto_tsquery(%(cfg)s::regconfig, t.term)) > 0
+          AND NOT EXISTS (SELECT 1 FROM chunks c
+                          WHERE c.search_tsv @@ plainto_tsquery(%(cfg)s::regconfig, t.term))
+        ORDER BY t.pos
+        """,
+        {"terms": terms, "cfg": ts_config},
+    ).fetchall()
+    return [row["term"] for row in rows]
+
+
 def word_boundary_pattern(term: str) -> str:
     """POSIX regex matching ``term`` literally, bounded by non-word characters.
     Every non-alphanumeric character is backslash-escaped (literal in ARE)."""

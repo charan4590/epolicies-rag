@@ -60,19 +60,30 @@ Question ─► 1 plan (deterministic, + Gemini when needed) ─► 2/3 hybrid r
 * `keyword_search.py` — PostgreSQL full-text search over a weighted `tsvector` (title A, heading path B,
   body C), OR-combined terms ranked by `ts_rank_cd`; plus an **exact channel** that matches identifiers
   (`HR-POL-012`, `Section 4.2`, `401(k)`, acronyms) as whole words, because stemming splits them apart.
-* `ranking.py` — weighted RRF: `score(d) = Σ wᵢ / (k + rankᵢ(d))`, k = `RRF_K` (60). Results are
-  de-duplicated by chunk id and then by content hash (duplicate files don't crowd the top-K).
+* `synonyms.py` — before a keyword search, equivalent terms found in the query are added: a small built-in
+  list ("abortion" ↔ "termination of pregnancy", "precertification" ↔ "prior authorization"), optional
+  groups from `SYNONYMS_FILE`, and acronyms **learned from the policies** ("Coordination Of Benefits (COB)").
+  Vector search already matches meaning; this makes two wordings of a question retrieve the same passages.
+* `ranking.py` — weighted RRF: `score(d) = Σ wᵢ / (k + rankᵢ(d))`, k = `RRF_K` (60); only ranks
+  1..`RRF_MAX_RANK` (10) of each list count, so a chunk found low down in several weak lists (e.g. ranks
+  16 + 17) cannot outrank the top hit of one list. Results are de-duplicated by chunk id and then by
+  content hash (duplicate files don't crowd the top-K).
 
 **Agentic workflow** (`backend/app/agents/`, orchestrated by `services/rag_service.py`)
 
 1. **Query understanding/planning** — regex extraction of identifiers, acronyms and quoted phrases always
    runs. Gemini (structured JSON output) is called only for follow-ups (to resolve "what about the
-   exception?") or complex/multi-part questions (`PLANNER_MODE=auto`).
+   exception?"), complex/multi-part questions, or questions containing words that occur in no policy —
+   usually spelling mistakes, which Gemini corrects before the keyword search (`PLANNER_MODE=auto`).
+   Only greetings/thanks skip retrieval. Questions about the collection itself ("how many policies are
+   there?", "list all policies about Medicare") are answered from the document index, without Gemini.
 2. **Hybrid retrieval** for 1–3 planned queries.
 3. **Evidence sufficiency** — Gemini judges whether the retrieved passages answer every part of the
    question; if not it names what is missing and proposes targeted queries.
-4. **Re-retrieval loop** — bounded by `MAX_RETRIEVAL_ROUNDS`; stops early on sufficient evidence, no
-   follow-up queries, or when a follow-up search finds no new chunks.
+4. **Re-retrieval loop** — bounded by `MAX_RETRIEVAL_ROUNDS`; policies that relevant passages refer to
+   (`refer to the "…" policy`, `[Policy name](url)`) are searched next, then the checker's queries. Stops
+   early on sufficient evidence, no follow-up queries, or when a follow-up search finds no new chunks.
+   Passages the checker marks relevant are placed first in the answer context, then the rest by RRF.
 5. **Answer generation** — sources are labelled `S1…Sn` in code and wrapped as untrusted
    `<source>` data; the model must cite every statement, preserve exceptions, surface conflicts and
    report insufficient evidence.
@@ -419,8 +430,8 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | `GOOGLE_API_KEY` | — | Gemini API key (server only) |
 | `GOOGLE_GENAI_USE_VERTEXAI` / `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` / `GOOGLE_APPLICATION_CREDENTIALS` | `false` / — / `us-central1` / — | Use Vertex AI instead of an API key |
 | `GEMINI_MODEL` | — (required for chat) | Generation model for planning, evidence checks, answers, verification |
-| `GEMINI_TIMEOUT_SECONDS` / `GEMINI_MAX_RETRIES` / `GEMINI_TEMPERATURE` | 60 / 4 / 0.1 | Generation call limits |
-| `GEMINI_THINKING_LEVEL` / `GEMINI_THINKING_BUDGET` | unset | Optional reasoning controls (Gemini 3 / 2.5 models) |
+| `GEMINI_TIMEOUT_SECONDS` / `GEMINI_MAX_RETRIES` / `GEMINI_TEMPERATURE` | 60 / 4 / 0 | Generation call limits; 0 = most repeatable answers |
+| `GEMINI_THINKING_LEVEL` / `GEMINI_THINKING_BUDGET` | unset | Optional reasoning controls (Gemini 3 / 2.5 models). For `gemini-2.5-flash` use `GEMINI_THINKING_BUDGET=1024`: 0 weakens answers, unset can cut answers off |
 | `EMBEDDING_MODEL` | `gemini-embedding-001` | Fixed; any other value is rejected |
 | `EMBEDDING_DIMENSIONS` | 768 | 128/256/512/768/1536/3072; must match the database |
 | `EMBEDDING_BATCH_SIZE` / `EMBEDDING_REQUESTS_PER_MINUTE` / `EMBEDDING_MAX_RETRIES` | 50 / 60 / 5 | Embedding throughput and retry limits |
@@ -429,10 +440,12 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | `VECTOR_BACKEND` | `auto` | `pgvector`, `array` (no extension needed), or `auto` (pgvector if installed) |
 | `MARKDOWN_DIR` / `EMBEDDING_JSONL_PATH` / `MAX_MARKDOWN_FILE_BYTES` | `./data/markdown` / `./artifacts/embedding.jsonl` / 5 MB | Paths and file limit |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` / `MIN_CHUNK_TOKENS` | 512 / 64 / 25 | Approximate tokens (≈4 chars/token) |
-| `TOP_K_VECTOR` / `TOP_K_KEYWORD` / `TOP_K_EXACT` / `TOP_K_FINAL` / `RRF_K` | 20 / 20 / 10 / 8 / 60 | Retrieval sizes and RRF constant |
+| `TOP_K_VECTOR` / `TOP_K_KEYWORD` / `TOP_K_EXACT` / `TOP_K_FINAL` / `RRF_K` | 20 / 20 / 10 / 12 / 60 | Retrieval sizes and RRF constant |
+| `RRF_MAX_RANK` | 10 | Only ranks 1..N of each list count in RRF (0 = all) |
+| `SYNONYM_EXPANSION` / `SYNONYMS_FILE` | `true` / — | Synonyms and learned acronyms for keyword search; optional JSON list of groups |
 | `TEXT_SEARCH_CONFIG` | `english` | PostgreSQL text-search configuration |
 | `MAX_RETRIEVAL_ROUNDS` / `MAX_QUERIES_PER_ROUND` | 3 / 3 | Agent loop bounds |
-| `MAX_CONTEXT_CHUNKS` / `MAX_CONTEXT_CHARS` | 12 / 24000 | Context sent to the answer model |
+| `MAX_CONTEXT_CHUNKS` / `MAX_CONTEXT_CHARS` | 16 / 40000 | Context sent to the answer model |
 | `PLANNER_MODE` | `auto` | `auto` (LLM planner only when useful), `always`, `never` |
 | `LLM_CITATION_VERIFICATION` | `true` | Gemini check of weakly supported claims |
 | `STRICT_GROUNDING` | `true` | Withhold any answer that has no verified citation to your documents |

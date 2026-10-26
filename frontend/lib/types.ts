@@ -97,6 +97,7 @@ export interface RetrievalRoundInfo {
   retrieved: number;
   new_chunks: number;
   search: SearchDiagnostics;
+  referenced_policies?: string[];
   assessment: {
     sufficient: boolean;
     confidence: string;
@@ -123,6 +124,7 @@ export interface ChatDiagnostics {
   stop_reason: string;
   retrieved_chunks: number;
   context_chunks: ChunkBrief[];
+  relevant_chunk_ids?: string[];
   models: { generation: string; embedding: string; embedding_dimensions: number };
   llm_usage: { calls: number; prompt_tokens: number; output_tokens: number; total_tokens: number; by_stage: Record<string, number> };
   timings_ms: Record<string, number>;

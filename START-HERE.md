@@ -95,7 +95,9 @@ If `ingest` stops (quota, network), run `python -m app.cli resume` later — fin
 **Windows, every day after setup:** double-click **`start-windows.bat`**. It starts your own PostgreSQL
 database (`%USERPROFILE%\epolicies-pgdata`, port 5433), asks you to sign in again if the Google Cloud
 (Vertex AI) login has expired, runs `doctor`, opens the backend and website in their own windows and
-then opens http://localhost:3000. Double-click **`stop-windows.bat`** to stop everything. If PostgreSQL is
+then opens http://localhost:3000. Double-click **`stop-windows.bat`** to stop everything. **Every week**, double-click **`update-windows.bat`**
+(next to `scrape_epolicies.py`): it backs up `output`, runs `scrape_epolicies.py --update`, shows what changed,
+asks before updating, then re-indexes only the new and changed files. If PostgreSQL is
 installed somewhere else, edit the three settings lines at the top of both files.
 
 Manual alternative:

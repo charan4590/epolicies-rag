@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleAlert, Copy, Check, GitCompareArrows, ShieldCheck, ShieldQuestion, TriangleAlert } from "lucide-react";
+import { CircleAlert, Copy, Check, GitCompareArrows, Info, ShieldCheck, ShieldQuestion, TriangleAlert } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { DiagnosticsPanel } from "@/components/chat/diagnostics-panel";
@@ -26,6 +26,10 @@ export function AssistantMessage({ response }: { response: ChatResponse }) {
   const [copied, setCopied] = useState(false);
   const refs = useRef<Record<string, HTMLDivElement | null>>({});
   const status = STATUS_TEXT[response.verification.status];
+  // An answer whose citations all checked out is shown with a quiet note instead of the warning banner,
+  // even when the evidence check said a part of the question was not covered.
+  const verifiedPartial =
+    response.citations.length > 0 && ["verified", "revised"].includes(response.verification.status);
 
   const focusSource = (label: string) => {
     setOpenSources((prev) => new Set(prev).add(label));
@@ -46,7 +50,18 @@ export function AssistantMessage({ response }: { response: ChatResponse }) {
 
   return (
     <div className="space-y-3">
-      {response.insufficient_evidence && (
+      {response.insufficient_evidence && verifiedPartial && (
+        <div className="flex gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <div className="space-y-0.5">
+            <p className="font-medium text-foreground">Partial answer – the cited passages are verified</p>
+            {response.missing_information.length > 0 && (
+              <p>Not covered by the passages found: {response.missing_information.join("; ")}</p>
+            )}
+          </div>
+        </div>
+      )}
+      {response.insufficient_evidence && !verifiedPartial && (
         <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
           <TriangleAlert aria-hidden />
           <AlertTitle>Insufficient evidence in the knowledge base</AlertTitle>

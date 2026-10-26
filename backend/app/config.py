@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     gemini_model: str = Field(default="", description="Generation model, e.g. gemini-3.5-flash")
     gemini_timeout_seconds: float = 60.0
     gemini_max_retries: int = Field(default=4, ge=0, le=10)
-    gemini_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    gemini_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     gemini_thinking_budget: int | None = Field(
         default=None, description="Optional thinking token budget (Gemini 2.5-series models)."
     )
@@ -96,16 +96,21 @@ class Settings(BaseSettings):
     top_k_vector: int = Field(default=20, ge=1, le=200)
     top_k_keyword: int = Field(default=20, ge=1, le=200)
     top_k_exact: int = Field(default=10, ge=0, le=100)
-    top_k_final: int = Field(default=8, ge=1, le=50)
+    top_k_final: int = Field(default=12, ge=1, le=50)
     rrf_k: int = Field(default=60, ge=1)
+    rrf_max_rank: int = Field(default=10, ge=0, le=200,
+                              description="Only ranks 1..N of each list count in RRF (0 = all ranks)")
     text_search_config: str = "english"
 
     # --- Agentic workflow -----------------------------------------------------
     max_retrieval_rounds: int = Field(default=3, ge=1, le=6)
     max_queries_per_round: int = Field(default=3, ge=1, le=6)
-    max_context_chunks: int = Field(default=12, ge=1, le=40)
-    max_context_chars: int = Field(default=24_000, ge=2_000)
+    max_context_chunks: int = Field(default=16, ge=1, le=40)
+    max_context_chars: int = Field(default=40_000, ge=2_000)
     planner_mode: str = Field(default="auto", description="auto | always | never")
+    synonym_expansion: bool = Field(
+        default=True, description="Add known synonyms/acronyms (built-in, SYNONYMS_FILE, learned) to keyword search")
+    synonyms_file: Path | None = Field(default=None, description="Optional JSON list of synonym groups")
     llm_citation_verification: bool = True
     strict_grounding: bool = Field(
         default=True,
@@ -141,7 +146,7 @@ class Settings(BaseSettings):
             )
         return value
 
-    @field_validator("google_application_credentials", "google_cloud_project", mode="before")
+    @field_validator("google_application_credentials", "google_cloud_project", "synonyms_file", mode="before")
     @classmethod
     def _blank_to_none(cls, value):
         # An empty `KEY=` line in .env means "not set" (Path("") would otherwise become ".").
@@ -197,6 +202,10 @@ class Settings(BaseSettings):
     @property
     def resolved_jsonl_path(self) -> Path:
         return _resolve(self.embedding_jsonl_path)
+
+    @property
+    def resolved_synonyms_path(self) -> Path | None:
+        return _resolve(self.synonyms_file) if self.synonyms_file else None
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -256,6 +265,7 @@ class Settings(BaseSettings):
             "top_k_exact": self.top_k_exact,
             "top_k_final": self.top_k_final,
             "rrf_k": self.rrf_k,
+            "rrf_max_rank": self.rrf_max_rank,
             "max_retrieval_rounds": self.max_retrieval_rounds,
             "planner_mode": self.planner_mode,
             "llm_citation_verification": self.llm_citation_verification,

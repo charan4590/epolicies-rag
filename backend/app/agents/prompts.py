@@ -23,14 +23,17 @@ Produce a retrieval plan. You do not answer the question.
 
 - standalone_question: rewrite the user's latest question so it is fully self-contained, resolving
   references ("it", "that exception", "what about part-time staff?") using the conversation history.
-  The history is context only; it is not a source of policy facts.
+  The history is context only; it is not a source of policy facts. Correct obvious spelling mistakes
+  ("jpoint partership" -> "joint partnership") but keep names, codes and acronyms as written.
 - is_policy_question: false only for greetings, thanks, or requests unrelated to company policies.
 - key_terms: important policy terminology from the question.
 - identifiers: exact codes or numbers that must match literally (policy IDs like HR-POL-012, section
   numbers, form numbers, acronyms such as PTO or MFA). Empty if none.
 - exact_phrases: short quoted or fixed phrases that should match exactly. Empty if none.
-- search_queries: 1-3 diverse search queries that together cover every part of the question. If the
-  question asks about several topics or documents, use one query per topic.
+- search_queries: 1-3 diverse search queries that together cover every part of the question, with
+  corrected spelling. If the question asks about several topics or documents, use one query per topic.
+  Where useful, one query may use a common synonym or the full form of an acronym (for example
+  "termination of pregnancy" for abortion, "coordination of benefits" for COB).
 - retrieval_emphasis: "keyword" when exact identifiers/terms dominate, "semantic" for conceptual
   questions, otherwise "balanced".
 - needs_multiple_documents: true when the answer likely spans several policies.

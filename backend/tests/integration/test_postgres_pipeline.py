@@ -17,7 +17,8 @@ from app.database.schema import SchemaMismatchError, existing_vector_dimensions,
 from app.ingestion import jsonl_store
 from app.ingestion.pipeline import IngestionPipeline, UnsafeDeletionError
 from app.retrieval.hybrid_search import hybrid_search
-from app.retrieval.keyword_search import exact_search, keyword_search
+from app.retrieval.keyword_search import exact_search, keyword_search, unknown_terms
+from app.retrieval.synonyms import keyword_query_with_synonyms
 from app.retrieval.vector_search import vector_search
 from app.schemas.api_models import ChatRequest
 from app.services.rag_service import RAGService
@@ -286,6 +287,17 @@ def test_load_rejects_wrong_dimensions(db, markdown_dir, tmp_path):
 
 
 # --------------------------------------------------------------------------- full agentic flow
+def d_notes(response) -> list[str]:
+    return response.diagnostics["plan"].get("notes", [])
+
+
+def test_unknown_terms_finds_words_missing_from_every_policy(db, markdown_dir):
+    ingest()
+    with connection() as conn:
+        assert unknown_terms(conn, "jpoint partership for sick leave") == ["jpoint", "partership"]
+        assert unknown_terms(conn, "sick leave days for employees") == []
+
+
 def test_agentic_flow_with_follow_up_retrieval_and_persistence(db, markdown_dir):
     ingest()
 
@@ -305,9 +317,15 @@ def test_agentic_flow_with_follow_up_retrieval_and_persistence(db, markdown_dir)
                                          "an approved critical project", "source_ids": [label], "support": "explicit"}],
                 "insufficient_evidence": False, "missing_information": [], "conflicts": []}
 
-    llm = FakeLLM({"evidence_check": evidence, "answer": answer})
+    # "rules" occurs in no fixture policy, so the planner (spelling correction) runs for this question.
+    plan_leave = {"standalone_question": "Tell me about leave rules", "is_policy_question": True,
+                  "intent": "leave overview", "key_terms": ["leave"], "identifiers": [], "exact_phrases": [],
+                  "search_queries": ["leave rules"], "retrieval_emphasis": "balanced",
+                  "needs_multiple_documents": False, "ambiguity": ""}
+    llm = FakeLLM({"evidence_check": evidence, "answer": answer, "planning": plan_leave})
     service = RAGService(get_settings(), embedder=FakeEmbedder(), llm=llm)
     response = service.answer(ChatRequest(question="Tell me about leave rules", include_diagnostics=True))
+    assert any("rules" in note for note in d_notes(response))
     d = response.diagnostics
     assert d["retrieval_rounds"] >= 1 and d["stop_reason"] in {"sufficient_evidence", "no_new_evidence",
                                                                "max_rounds_reached", "no_follow_up_queries"}
@@ -323,7 +341,8 @@ def test_agentic_flow_with_follow_up_retrieval_and_persistence(db, markdown_dir)
         "exact_phrases": [], "search_queries": ["carryover exception approval department head"],
         "retrieval_emphasis": "balanced", "needs_multiple_documents": False, "ambiguity": ""}
     follow = service.answer(ChatRequest(question="Who approves that exception?", conversation_id=response.conversation_id))
-    assert "Tell me about leave rules" in llm.calls[[c["stage"] for c in llm.calls].index("planning")]["prompt"]
+    follow_planning = [c for c in llm.calls if c["stage"] == "planning"][-1]
+    assert "Tell me about leave rules" in follow_planning["prompt"]
     assert follow.standalone_question.startswith("Who must approve")
     with connection() as conn:
         conv = repo.get_conversation(conn, response.conversation_id)
@@ -350,3 +369,26 @@ def test_prompt_injection_content_is_wrapped_as_untrusted(db, markdown_dir):
     assert "IGNORE ALL PREVIOUS INSTRUCTIONS" in captured["prompt"]  # present only as quoted data…
     assert "untrusted" in llm.calls[-1]["system"]  # …under a system rule that it is untrusted
     assert response.citations[0].relative_path == "misc/injection-test.md"
+
+
+def test_catalog_questions_are_answered_from_the_index_without_gemini(db, markdown_dir):
+    ingest()
+    with connection() as conn:
+        titles = repo.indexed_document_titles(conn)
+    service = RAGService(get_settings(), embedder=FakeEmbedder(), llm=FakeLLM({}))
+    count = service.answer(ChatRequest(question="How many policies are there?", persist=False))
+    assert f"**{len(titles)}** policy documents" in count.answer
+    assert count.verification.status == "not_applicable" and not count.insufficient_evidence
+    listed = service.answer(ChatRequest(question="list all policies about remote work", persist=False))
+    assert "Remote Work Policy" in listed.answer and "Acceptable Use" not in listed.answer
+
+
+def test_keyword_search_adds_acronyms_learned_from_the_policies(db, markdown_dir):
+    ingest()
+    with connection() as conn:
+        expanded = keyword_query_with_synonyms(conn, "How many PTO days can I carry over?")
+    assert expanded.endswith("paid time off")
+    settings = get_settings()
+    with connection() as conn:
+        result = hybrid_search(conn, FakeEmbedder(), ["paid time off carry over"], settings=settings)
+    assert any(name.startswith("keyword:") and "pto" in name for name in result.lists)

@@ -183,10 +183,15 @@ def plan_query(
     queries = queries[: max(1, max_queries)]
     # Union of LLM- and regex-detected identifiers; regex results are always kept.
     identifiers = list(dict.fromkeys(base.identifiers + [i.strip() for i in result.identifiers if i.strip()]))
+    # Only greetings/thanks (detected without the LLM) skip retrieval. The LLM sometimes labels a
+    # misspelt follow-up as "not a policy question" even after rewriting it correctly; searching
+    # anyway is safe, because an unrelated question simply finds no evidence.
+    notes = [] if result.is_policy_question else [
+        "Planner marked the question as not policy-related; searched anyway."]
     return QueryPlan(
         original_question=question,
         standalone_question=standalone,
-        is_policy_question=result.is_policy_question or bool(base.identifiers),
+        is_policy_question=base.is_policy_question,
         intent=result.intent,
         key_terms=result.key_terms[:12],
         identifiers=identifiers[:10],
@@ -196,4 +201,5 @@ def plan_query(
         needs_multiple_documents=result.needs_multiple_documents,
         ambiguity=result.ambiguity.strip(),
         planner="llm",
+        notes=notes,
     )

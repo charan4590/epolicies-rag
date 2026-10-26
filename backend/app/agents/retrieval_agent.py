@@ -8,7 +8,8 @@ search surfaces no chunks that were not already seen.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +26,24 @@ from app.retrieval.types import RetrievedChunk
 logger = logging.getLogger(__name__)
 EventFn = Callable[[dict[str, Any]], None]
 
+# 'refer to the "Precertification - Policy - ..." policy', 'see "Durable Medical Equipment (DME)"'
+_REFERENCE = re.compile(
+    r"\b(?:refer(?:s|red)?\s+to|see(?:\s+also)?|per|as\s+(?:described|outlined)\s+in|in\s+accordance\s+with)"
+    r"\s+(?:the\s+)?(?:[\"“]([^\"”\n]{4,150})[\"”]|\[([^\]\n]{4,150})\]\()",
+    re.IGNORECASE,
+)
+
+
+def referenced_policies(chunks: Sequence[RetrievedChunk]) -> list[str]:
+    """Policy/section names that the given passages tell the reader to consult (quoted or linked names)."""
+    found: list[str] = []
+    for chunk in chunks:
+        for match in _REFERENCE.finditer(chunk.text):
+            name = " ".join((match.group(1) or match.group(2)).split()).strip(" .,:;")
+            if name and name.lower() != chunk.title.lower() and name not in found:
+                found.append(name)
+    return found
+
 
 @dataclass
 class RetrievalRound:
@@ -34,6 +53,7 @@ class RetrievalRound:
     new_chunks: int
     search: dict[str, Any]
     assessment: dict[str, Any] | None = None
+    referenced_policies: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -46,6 +66,7 @@ class RetrievalOutcome:
     rounds: list[RetrievalRound] = field(default_factory=list)
     stop_reason: str = ""
     assessment: EvidenceAssessment | None = None
+    relevant_ids: list[str] = field(default_factory=list)  # chunks the evidence check marked relevant
 
     @property
     def missing_information(self) -> list[str]:
@@ -131,16 +152,23 @@ class RetrievalAgent:
             if round_no == settings.max_retrieval_rounds:
                 outcome.stop_reason = "max_rounds_reached"
                 break
-            if not assessment.follow_up_queries:
+            # Policies that the relevant passages point to ("refer to the ... policy") are searched next,
+            # ahead of the checker's own follow-up queries.
+            relevant_chunks = [pool[cid] for cid in relevant if cid in pool] or candidates
+            references = [r for r in referenced_policies(relevant_chunks) if r not in tried]
+            follow_ups = list(dict.fromkeys(references + assessment.follow_up_queries))
+            if not follow_ups:
                 outcome.stop_reason = "no_follow_up_queries"
                 break
-            queries = assessment.follow_up_queries
+            record.referenced_policies = references
+            queries = follow_ups[: settings.max_queries_per_round]
         else:  # pragma: no cover - loop always breaks or exhausts
             outcome.stop_reason = outcome.stop_reason or "max_rounds_reached"
         if not outcome.stop_reason:
             outcome.stop_reason = "max_rounds_reached"
 
         outcome.all_retrieved_ids = set(pool)
+        outcome.relevant_ids = [cid for cid in relevant if cid in pool]
         outcome.chunks = self._select_context(pool, order, relevant)
         return outcome
 
