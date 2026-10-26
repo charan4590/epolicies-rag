@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     gemini_model: str = Field(default="", description="Generation model, e.g. gemini-3.5-flash")
     gemini_timeout_seconds: float = 60.0
     gemini_max_retries: int = Field(default=4, ge=0, le=10)
-    gemini_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    gemini_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     gemini_thinking_budget: int | None = Field(
         default=None, description="Optional thinking token budget (Gemini 2.5-series models)."
     )

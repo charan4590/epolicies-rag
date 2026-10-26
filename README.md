@@ -430,7 +430,7 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | `GOOGLE_API_KEY` | — | Gemini API key (server only) |
 | `GOOGLE_GENAI_USE_VERTEXAI` / `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` / `GOOGLE_APPLICATION_CREDENTIALS` | `false` / — / `us-central1` / — | Use Vertex AI instead of an API key |
 | `GEMINI_MODEL` | — (required for chat) | Generation model for planning, evidence checks, answers, verification |
-| `GEMINI_TIMEOUT_SECONDS` / `GEMINI_MAX_RETRIES` / `GEMINI_TEMPERATURE` | 60 / 4 / 0 | Generation call limits; 0 = most repeatable answers |
+| `GEMINI_TIMEOUT_SECONDS` / `GEMINI_MAX_RETRIES` / `GEMINI_TEMPERATURE` | 60 / 4 / 0.1 | Generation call limits |
 | `GEMINI_THINKING_LEVEL` / `GEMINI_THINKING_BUDGET` | unset | Optional reasoning controls (Gemini 3 / 2.5 models). For `gemini-2.5-flash` use `GEMINI_THINKING_BUDGET=1024`: 0 weakens answers, unset can cut answers off |
 | `EMBEDDING_MODEL` | `gemini-embedding-001` | Fixed; any other value is rejected |
 | `EMBEDDING_DIMENSIONS` | 768 | 128/256/512/768/1536/3072; must match the database |
