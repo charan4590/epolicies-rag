@@ -98,8 +98,6 @@ class Settings(BaseSettings):
     top_k_exact: int = Field(default=10, ge=0, le=100)
     top_k_final: int = Field(default=12, ge=1, le=50)
     rrf_k: int = Field(default=60, ge=1)
-    rrf_max_rank: int = Field(default=10, ge=0, le=200,
-                              description="Only ranks 1..N of each list count in RRF (0 = all ranks)")
     text_search_config: str = "english"
 
     # --- Agentic workflow -----------------------------------------------------
@@ -265,7 +263,6 @@ class Settings(BaseSettings):
             "top_k_exact": self.top_k_exact,
             "top_k_final": self.top_k_final,
             "rrf_k": self.rrf_k,
-            "rrf_max_rank": self.rrf_max_rank,
             "max_retrieval_rounds": self.max_retrieval_rounds,
             "planner_mode": self.planner_mode,
             "llm_citation_verification": self.llm_citation_verification,

@@ -26,15 +26,12 @@ class FusedItem:
         return min(self.contributions.values()) if self.contributions else 10**9
 
 
-def reciprocal_rank_fusion(lists: Sequence[RankedList], k: int = 60, max_rank: int | None = None) -> list[FusedItem]:
+def reciprocal_rank_fusion(lists: Sequence[RankedList], k: int = 60) -> list[FusedItem]:
     """RRF_score(d) = Σ_i w_i / (k + rank_i(d)), ranks starting at 1.
 
     A chunk that appears more than once within the same list only counts at its
-    best rank. With ``max_rank``, ranks below that cut-off add nothing: otherwise a
-    chunk ranked e.g. 16th and 17th in two weak lists outscores the 1st result of a
-    single strong list. Such chunks stay in the result (score 0) after all scored ones.
-    Ties are broken by the best individual rank, then chunk ID, so the ordering is
-    deterministic.
+    best rank. Ties are broken by the best individual rank, then chunk ID, so
+    the ordering is deterministic.
     """
     if k <= 0:
         raise ValueError("k must be positive")
@@ -50,8 +47,7 @@ def reciprocal_rank_fusion(lists: Sequence[RankedList], k: int = 60, max_rank: i
             seen.add(chunk_id)
             rank += 1
             item = fused.setdefault(chunk_id, FusedItem(chunk_id, 0.0))
-            if max_rank is None or rank <= max_rank:
-                item.score += ranked.weight / (k + rank)
+            item.score += ranked.weight / (k + rank)
             prior = item.contributions.get(ranked.name)
             item.contributions[ranked.name] = rank if prior is None else min(prior, rank)
     return sorted(fused.values(), key=lambda it: (-it.score, it.best_rank, it.chunk_id))

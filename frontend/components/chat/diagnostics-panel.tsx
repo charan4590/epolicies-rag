@@ -118,8 +118,7 @@ export function DiagnosticsPanel({ diagnostics }: { diagnostics: ChatDiagnostics
           <div>
             <p className="mb-1 font-medium">Context passed to the answer</p>
             <p className="mb-1 text-muted-foreground">
-              Passages the evidence check marked relevant (✓) come first, then the rest by RRF score. RRF only counts
-              the top ranks of each search, so a passage found low down in several searches cannot outrank a top hit.
+              Passages the evidence check marked relevant (✓) come first, then the rest by RRF score.
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-left">

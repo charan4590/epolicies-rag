@@ -196,19 +196,6 @@ def test_weak_claim_detected_when_number_missing():
     assert report.claims[0].status == "weak" and report.claims[0].missing_numbers == ["300"]
 
 
-def test_rrf_rank_cut_off_stops_deep_ranks_beating_a_top_hit():
-    # Real case: a chunk at vector rank 16 + keyword rank 17 (0.0261) outscored the vector #1 (0.0164).
-    fillers = [f"f{i}" for i in range(15)]
-    vector = RankedList("vector", ["answer"] + fillers + ["junk"])
-    keyword = RankedList("keyword", [f"k{i}" for i in range(16)] + ["junk"])
-    uncapped = [i.chunk_id for i in reciprocal_rank_fusion([vector, keyword], k=60)]
-    capped = reciprocal_rank_fusion([vector, keyword], k=60, max_rank=10)
-    assert uncapped[0] == "junk"
-    assert capped[0].chunk_id == "answer"
-    junk = next(i for i in capped if i.chunk_id == "junk")
-    assert junk.score == 0 and capped[-1].score == 0  # kept, but after every scored chunk
-
-
 def test_referenced_policies_are_found_in_quotes_and_links():
     from app.agents.retrieval_agent import referenced_policies
 

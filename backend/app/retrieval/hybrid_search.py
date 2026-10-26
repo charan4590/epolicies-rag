@@ -166,7 +166,7 @@ def hybrid_search(
         for c in ex:
             remember(c, "")
 
-    fused = reciprocal_rank_fusion(lists, k=settings.rrf_k, max_rank=settings.rrf_max_rank or None)
+    fused = reciprocal_rank_fusion(lists, k=settings.rrf_k)
     ordered_ids = [item.chunk_id for item in fused]
     kept, dropped = dedupe_by_content(ordered_ids, {cid: pool[cid].content_hash for cid in ordered_ids})
     result.duplicates_collapsed = sum(len(v) for v in dropped.values())

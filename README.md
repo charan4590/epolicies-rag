@@ -64,10 +64,8 @@ Question ─► 1 plan (deterministic, + Gemini when needed) ─► 2/3 hybrid r
   list ("abortion" ↔ "termination of pregnancy", "precertification" ↔ "prior authorization"), optional
   groups from `SYNONYMS_FILE`, and acronyms **learned from the policies** ("Coordination Of Benefits (COB)").
   Vector search already matches meaning; this makes two wordings of a question retrieve the same passages.
-* `ranking.py` — weighted RRF: `score(d) = Σ wᵢ / (k + rankᵢ(d))`, k = `RRF_K` (60); only ranks
-  1..`RRF_MAX_RANK` (10) of each list count, so a chunk found low down in several weak lists (e.g. ranks
-  16 + 17) cannot outrank the top hit of one list. Results are de-duplicated by chunk id and then by
-  content hash (duplicate files don't crowd the top-K).
+* `ranking.py` — weighted RRF: `score(d) = Σ wᵢ / (k + rankᵢ(d))`, k = `RRF_K` (60). Results are
+  de-duplicated by chunk id and then by content hash (duplicate files don't crowd the top-K).
 
 **Agentic workflow** (`backend/app/agents/`, orchestrated by `services/rag_service.py`)
 
@@ -441,7 +439,6 @@ All backend settings live in `epolicies-rag/.env` (see `.env.example`); they are
 | `MARKDOWN_DIR` / `EMBEDDING_JSONL_PATH` / `MAX_MARKDOWN_FILE_BYTES` | `./data/markdown` / `./artifacts/embedding.jsonl` / 5 MB | Paths and file limit |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` / `MIN_CHUNK_TOKENS` | 512 / 64 / 25 | Approximate tokens (≈4 chars/token) |
 | `TOP_K_VECTOR` / `TOP_K_KEYWORD` / `TOP_K_EXACT` / `TOP_K_FINAL` / `RRF_K` | 20 / 20 / 10 / 12 / 60 | Retrieval sizes and RRF constant |
-| `RRF_MAX_RANK` | 10 | Only ranks 1..N of each list count in RRF (0 = all) |
 | `SYNONYM_EXPANSION` / `SYNONYMS_FILE` | `true` / — | Synonyms and learned acronyms for keyword search; optional JSON list of groups |
 | `TEXT_SEARCH_CONFIG` | `english` | PostgreSQL text-search configuration |
 | `MAX_RETRIEVAL_ROUNDS` / `MAX_QUERIES_PER_ROUND` | 3 / 3 | Agent loop bounds |
