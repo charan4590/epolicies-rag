@@ -297,3 +297,16 @@ def test_empty_document_has_no_chunks():
 def test_token_estimate():
     assert estimate_tokens("") == 0
     assert 20 <= estimate_tokens("word " * 20) <= 30
+
+
+def test_deeply_nested_lists_do_not_swallow_later_headings():
+    # Real case: an ePolicies step table converted to a list nested ~20 levels deep made markdown-it
+    # stop parsing structure, so every later heading ("Precertification and Referrals", "Procedure
+    # Codes", …) was merged into the list's section.
+    nested = "\n".join("  " * depth + f"- **Step:** {depth}" for depth in range(25))
+    text = f"# Policy\n\n#### Steps\n\n{nested}\n\n#### Precertification\n\nPrecert required.\n\n#### Procedure Codes\n\nS0190\n"
+    parsed = parse_markdown(text, "policy.md")
+    assert [h for _, h in parsed.headings][-2:] == ["Precertification", "Procedure Codes"]
+    chunks = chunk_document(parsed, "doc", chunk_size=512, chunk_overlap=64, min_chunk_tokens=0)
+    precert = [c for c in chunks if "Precert required." in c.text]
+    assert precert and precert[0].heading_path[-1] == "Precertification"

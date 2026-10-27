@@ -36,7 +36,7 @@ from app.config import Settings, get_settings
 from app.database import repository as repo
 from app.database.connection import connection, raw_connect
 from app.ingestion import jsonl_store
-from app.ingestion.chunker import Chunk, chunk_document
+from app.ingestion.chunker import CHUNKER_VERSION, Chunk, chunk_document
 from app.ingestion.embedder import Embedder, GeminiEmbedder, document_config
 from app.ingestion.markdown_loader import (
     DocumentReadError,
@@ -178,6 +178,9 @@ def build_plan(settings: Settings, conn: psycopg.Connection, *, force: bool = Fa
             and row["status"] == "indexed"
             and row["content_hash"] == doc.content_hash
             and (row["embedding_config"] == config_id or row["chunk_count"] == 0)
+            # Re-chunk documents indexed by an older parser/chunker; unchanged chunk texts reuse the
+            # embedding cache, so only genuinely new chunks are sent to Gemini.
+            and (row.get("chunker_version") or "v1") == CHUNKER_VERSION
         ):
             unchanged.append(doc_id)
         else:
@@ -387,6 +390,7 @@ class IngestionPipeline:
                     "front_matter": {k: v for k, v in parsed.front_matter.items() if len(v) < 500},
                     "empty": not item.chunks,
                     "warnings": loaded.warnings,
+                    "chunker_version": CHUNKER_VERSION,
                 }
             except Exception as exc:  # noqa: BLE001 - one bad file must not stop the run
                 item.failed = True

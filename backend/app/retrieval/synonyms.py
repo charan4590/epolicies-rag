@@ -6,8 +6,8 @@ extra passages. Before a keyword search, any known equivalent terms found in the
 
 * a small built-in list of common policy synonyms,
 * optional groups from ``SYNONYMS_FILE`` (JSON list of lists of terms),
-* acronyms defined in the indexed policies themselves, e.g. "Coordination Of Benefits (COB)" –
-  learned from the chunk text and cached until the index changes.
+* acronyms defined in the indexed policies themselves – "Coordination Of Benefits (COB)" in the text or
+  "| MSA | Medicare Set Aside |" in an acronym table – learned and cached until the index changes.
 
 Only keyword search is expanded; the question itself and vector search are unchanged.
 """
@@ -35,6 +35,11 @@ _SMALL_WORDS = {"of", "and", "the", "for", "to", "in", "on", "a", "an", "&"}
 _ACRONYM_SQL = r"""
     SELECT m[1] AS before, m[2] AS acronym
     FROM chunks c, regexp_matches(c.text, '((?:[A-Za-z][A-Za-z/-]*\s+){1,8})\(([A-Z][A-Z0-9&]{1,7})\)', 'g') AS m
+"""
+# Acronym tables: "| MSA | Medicare Set Aside |"
+_ACRONYM_TABLE_SQL = r"""
+    SELECT m[2] AS before, m[1] AS acronym
+    FROM chunks c, regexp_matches(c.text, '\|\s*([A-Z][A-Z0-9&]{1,7})\s*\|\s*([A-Za-z][^|\n]{2,80}?)\s*\|', 'g') AS m
 """
 
 
@@ -82,7 +87,8 @@ class SynonymIndex:
             if signature == self._signature:
                 return self._acronym_groups
         pairs: dict[str, set[str]] = {}
-        for row in conn.execute(_ACRONYM_SQL).fetchall():
+        rows = conn.execute(_ACRONYM_SQL).fetchall() + conn.execute(_ACRONYM_TABLE_SQL).fetchall()
+        for row in rows:
             phrase = acronym_from(row["before"], row["acronym"])
             if phrase and len(row["acronym"]) >= 2:
                 pairs.setdefault(row["acronym"].lower(), set()).add(_norm(phrase))

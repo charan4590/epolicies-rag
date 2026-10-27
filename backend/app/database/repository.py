@@ -73,7 +73,7 @@ def get_all_documents(conn: psycopg.Connection) -> dict[str, dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT document_id, relative_path, title, content_hash, source_hash, status, chunk_count,
-               embedding_config, failure_count, last_indexed_at
+               embedding_config, failure_count, last_indexed_at, metadata->>'chunker_version' AS chunker_version
         FROM documents
         """
     ).fetchall()

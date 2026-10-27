@@ -392,3 +392,27 @@ def test_keyword_search_adds_acronyms_learned_from_the_policies(db, markdown_dir
     with connection() as conn:
         result = hybrid_search(conn, FakeEmbedder(), ["paid time off carry over"], settings=settings)
     assert any(name.startswith("keyword:") and "pto" in name for name in result.lists)
+
+
+def test_acronyms_are_learned_from_acronym_tables(db, markdown_dir):
+    (markdown_dir / "claims").mkdir(exist_ok=True)
+    (markdown_dir / "claims" / "workers-comp.md").write_text(
+        "# Workers Comp Claims\n\nAcronym Table\n\n| Term | Definition |\n| --- | --- |\n"
+        "| MSA | Medicare Set Aside |\n| WC | Worker's Compensation |\n| S0190 | Mifepristone - Oral - 200 MG |\n\n"
+        "We don't cover work-related injury unless WC has exhausted.\n")
+    ingest()
+    with connection() as conn:
+        assert keyword_query_with_synonyms(conn, "When does WC pay?").endswith("worker's compensation")
+        assert keyword_query_with_synonyms(conn, "what is a medicare set aside").endswith("msa")
+
+
+def test_documents_from_an_older_chunker_are_rechunked_with_cached_embeddings(db, markdown_dir):
+    first, _ = ingest()
+    with connection() as conn:
+        conn.execute("UPDATE documents SET metadata = metadata - 'chunker_version'")  # as indexed before v2
+        conn.commit()
+    again, embedder = ingest()
+    assert len(again.modified_documents) == first.documents_indexed
+    assert embedder.stats.requests == 0  # same chunk texts: every embedding comes from the cache
+    third, _ = ingest()
+    assert third.unchanged_documents == first.documents_indexed

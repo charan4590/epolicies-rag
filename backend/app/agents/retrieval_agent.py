@@ -26,10 +26,10 @@ from app.retrieval.types import RetrievedChunk
 logger = logging.getLogger(__name__)
 EventFn = Callable[[dict[str, Any]], None]
 
-# 'refer to the "Precertification - Policy - ..." policy', 'see "Durable Medical Equipment (DME)"'
+# 'refer to the "Precertification - Policy - ..." policy', '**See:** [Travel and Lodging - Procedures](url)'
 _REFERENCE = re.compile(
     r"\b(?:refer(?:s|red)?\s+to|see(?:\s+also)?|per|as\s+(?:described|outlined)\s+in|in\s+accordance\s+with)"
-    r"\s+(?:the\s+)?(?:[\"“]([^\"”\n]{4,150})[\"”]|\[([^\]\n]{4,150})\]\()",
+    r"[\s:*\-–]*(?:the\s+)?(?:[\"“]([^\"”\n]{4,150})[\"”]|\[([^\]\n]{4,150})\]\()",
     re.IGNORECASE,
 )
 

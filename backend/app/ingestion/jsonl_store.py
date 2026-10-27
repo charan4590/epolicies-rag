@@ -342,7 +342,9 @@ def load_jsonl(
             size_bytes=0,
             encoding=None,
             file_modified_at=None,
-            metadata={"loaded_from_jsonl": True},
+            metadata={"loaded_from_jsonl": True,
+                      # keeps `ingest` from re-chunking documents whose chunks came from the same chunker
+                      "chunker_version": (meta.get("chunk_metadata") or {}).get("chunker_version")},
         )
         chunks = [
             repo.ChunkRecord(

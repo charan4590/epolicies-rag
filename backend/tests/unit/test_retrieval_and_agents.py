@@ -236,3 +236,17 @@ def test_retrieval_searches_a_referenced_policy_next(monkeypatch):
     assert searched[1] == ["Nonparticipating Provider Authorizations"]
     assert outcome.stop_reason == "sufficient_evidence" and {c.chunk_id for c in outcome.chunks} == {"a", "p"}
     assert outcome.rounds[0].referenced_policies == ["Nonparticipating Provider Authorizations"]
+
+
+def test_referenced_policies_in_epolicies_see_format():
+    from app.agents.retrieval_agent import referenced_policies
+
+    text = ("| Provider is nonpar | **See:** [Precertification - Policy - Precertification: Nonparticipating "
+            "Provider Authorizations](https://example.com/p.html#prec_nonpar) |\n"
+            "this exclusion doesn't apply - **see** [Coverage Details: Spontaneous Abortion (Miscarriage)]"
+            "(https://example.com/a.html#x)\n**See:**\n\n- [Maternity - Traditional Claim Processing](https://e.com/m)")
+    assert referenced_policies([chunk("a", "d1", text)]) == [
+        "Precertification - Policy - Precertification: Nonparticipating Provider Authorizations",
+        "Coverage Details: Spontaneous Abortion (Miscarriage)",
+        "Maternity - Traditional Claim Processing",
+    ]

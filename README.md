@@ -515,6 +515,10 @@ PostgreSQL schema (`backend/app/database/schema.sql`):
 
 ## Design notes and limitations
 
+* **Deeply nested lists**: ePolicies step tables become lists nested ~20 levels deep. The Markdown parser's
+  nesting limit is raised to 100 (markdown-it's default of 20 made every later heading part of that list).
+  Documents indexed by an older parser (`CHUNKER_VERSION`) are re-chunked automatically by the next `ingest`;
+  unchanged chunk texts reuse cached embeddings.
 * **Token counts are approximate** (≈4 characters per token with a words×1.3 floor) because no offline
   Gemini tokenizer is available; `CHUNK_SIZE` is a target, kept far below the 2048-token embedding limit.
 * **Index choice**: an HNSW index is created (≤2000 dims). For ~235 documents an exact scan would also be

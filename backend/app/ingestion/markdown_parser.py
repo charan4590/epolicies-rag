@@ -19,7 +19,9 @@ _URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"'`|]+", re.IGNORECASE)
 _TRAILING_PUNCT = ".,;:!?*_~"
 _FRONT_MATTER_KEYS_FOR_URL = ("source_url", "url", "source", "link", "canonical_url")
 
-_md = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+# maxNesting: ePolicies step tables become lists nested ~20 levels deep. markdown-it's default limit (20)
+# silently stops parsing structure there, so every later heading became part of that list.
+_md = MarkdownIt("commonmark", {"html": False, "maxNesting": 100}).enable(["table", "strikethrough"])
 
 
 @dataclass

@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 from app.ingestion.markdown_parser import Block, ParsedDocument
 
-CHUNKER_VERSION = "v1"
+CHUNKER_VERSION = "v2"  # v2: deeply nested lists no longer swallow later headings
 _SENTENCE_RE = re.compile(r"(?<=[.!?;:])\s+(?=[A-Z0-9\"'(\[*_-])|\n{2,}|\n(?=\s*[-*+] |\s*\d+[.)] )")
 
 
