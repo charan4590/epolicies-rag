@@ -519,6 +519,27 @@ PostgreSQL schema (`backend/app/database/schema.sql`):
   nesting limit is raised to 100 (markdown-it's default of 20 made every later heading part of that list).
   Documents indexed by an older parser (`CHUNKER_VERSION`) are re-chunked automatically by the next `ingest`;
   unchanged chunk texts reuse cached embeddings.
+* **Split step lists keep their conditions**: when one list item (an ePolicies step tree: Step → If… →
+  Then…) is too long for a chunk, it is split between lines and every later part starts with its parent
+  steps (link text only, no URLs), like split tables repeat their header. Overlap between chunks uses whole
+  sentences only and is not used between list items, so a chunk never starts mid-sentence.
+* **Numbers in ranges**: citation verification accepts a number inside a range stated in the cited passage
+  ("20 weeks" ⊂ "17 to 24 weeks", code 99203 ⊂ "99202 - 99205"; "N … or greater" only with the same unit).
+  When the claim names a code (S2260), only ranges on that code's line count.
+* **Referenced policies**: only references whose name shares a topic word with the question or the missing
+  information are searched (max 2 per round). If round 1 finds nothing relevant, one more search is made and
+  the assistant answers "not found" without an answer-writing call. `python -m app.cli missing-references`
+  lists referenced policies/pages that are not indexed.
+* **Spelling correction** runs only for words that look like misspellings of a policy word ("subrogaton");
+  normal words that the policies do not use ("parking") do not cost a Gemini call.
+* **Keyword search extras** (stored text unchanged): slash-joined words are also indexed separately
+  (`Rawlings/Machinify`), every code of a 5-digit code range (`99202 - 99205` → 99203, 99204), `RU486`/`RU-486`
+  variants; 5-digit codes and dates (`06/03/25`) are exact identifiers; a match on the chunk's own section
+  heading boosts keyword ranking. Embedded text contains link text only, no URLs.
+* **Collection questions** accept typos ("how mny policies"), "which policies mention X", "… in X", and fall
+  back to section headings when no title matches.
+* **Ambiguous acronyms are not expanded**: an acronym learned with two meanings, or a learned acronym that is
+  also used as a US state code ("Massachusetts (MA)" vs "MA" = Medicare Advantage), is left as typed.
 * **Token counts are approximate** (≈4 characters per token with a words×1.3 floor) because no offline
   Gemini tokenizer is available; `CHUNK_SIZE` is a target, kept far below the 2048-token embedding limit.
 * **Index choice**: an HNSW index is created (≤2000 dims). For ~235 documents an exact scan would also be

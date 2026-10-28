@@ -287,6 +287,41 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     return 0 if result["consistent"] else 2
 
 
+def cmd_missing_references(args: argparse.Namespace) -> int:
+    """Policies/pages that indexed passages refer to ("See: [Name](link)") but that are not indexed."""
+    from app.agents.retrieval_agent import referenced_policies
+    from app.database.connection import connection
+    from app.retrieval.types import RetrievedChunk
+
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT c.chunk_id, c.document_id, c.chunk_index, c.text, d.title, d.relative_path, c.heading_path,
+                      c.source_urls, d.source_url AS document_source_url, c.content_hash
+               FROM chunks c JOIN documents d USING (document_id) WHERE d.status = 'indexed'"""
+        ).fetchall()
+    known = {r["title"].strip().lower() for r in rows}
+    known |= {h.strip().lower() for r in rows for h in (r["heading_path"] or [])}
+    missing: dict[str, set[str]] = {}
+    for r in rows:
+        chunk = RetrievedChunk(chunk_id=r["chunk_id"], document_id=r["document_id"], chunk_index=r["chunk_index"],
+                               text=r["text"], title=r["title"], relative_path=r["relative_path"],
+                               heading_path=list(r["heading_path"] or []), source_urls=list(r["source_urls"] or []),
+                               document_source_url=r["document_source_url"], content_hash=r["content_hash"])
+        for name in referenced_policies([chunk]):
+            short = name.split(":")[-1].strip().lower()
+            if name.lower() not in known and short not in known:
+                missing.setdefault(name, set()).add(r["title"])
+    result = {"missing_references": len(missing),
+              "references": [{"name": n, "referenced_by": sorted(t)} for n, t in sorted(missing.items())]}
+    if args.json:
+        _print(result, True)
+    else:
+        print(f"{len(missing)} referenced policies/pages are not in the index (answers can only point to them):")
+        for item in result["references"]:
+            print(f"  - {item['name']}\n      referenced by: {', '.join(item['referenced_by'])}")
+    return 0
+
+
 def cmd_search(args: argparse.Namespace) -> int:
     from app.agents.query_planner import deterministic_plan
     from app.database.connection import connection
@@ -416,6 +451,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prune", action="store_true", help="mark documents absent from the file as deleted")
     p.add_argument("--allow-unverified", action="store_true", help="accept a file without a matching manifest")
     add("reconcile", cmd_reconcile, "Compare embedding.jsonl with PostgreSQL")
+    add("missing-references", cmd_missing_references,
+        "List policies/pages that indexed passages refer to ('See: …') but that are not indexed")
     p = add("search", cmd_search, "Retrieval diagnostics for a query")
     p.add_argument("query")
     p.add_argument("--mode", choices=["hybrid", "vector", "keyword"], default="hybrid")

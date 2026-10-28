@@ -52,17 +52,66 @@ def content_words(text: str) -> set[str]:
     return {_stem(w) for w in _WORD_RE.findall(text.lower()) if w not in _STOP and len(w) > 1}
 
 
+# "17 to 24 weeks", "99202 - 99205", "ages 2 through 18" – not phone numbers (1-800-555-1234) or dates.
+_RANGE_RE = re.compile(
+    r"(?<![\d./-])(\d+(?:\.\d+)?)\s*(?:-|–|—|to|through|thru)\s*(\d+(?:\.\d+)?)(?![\d./]|-\d)\s*([a-z]+)?", re.I)
+# "32 weeks or greater" – open-ended, so it only supports a claim number with the same unit ("35 weeks")
+_OPEN_RANGE_RE = re.compile(
+    r"(?<![\d./-])(\d+(?:\.\d+)?)\s+([a-z]+)\s+or\s+(?:greater|more|older|above|over|higher)\b", re.I)
+_NUMBER_UNIT_RE = re.compile(r"(\d+(?:\.\d+)?)(?:\s+([a-z]+))?", re.I)
+_CODE_RE = re.compile(r"\b(?:[A-Z]\d{4}|\d{5})\b")  # S2260, 99203
+
+
 def numbers_in(text: str) -> set[str]:
     return {n.strip("$%").replace(",", "") for n in _NUMBER_RE.findall(text)}
 
 
+def _unit(word: str | None) -> str | None:
+    return _stem(word.lower()) if word else None
+
+
+def ranges_in(text: str, *, codes: set[str] | None = None) -> list[tuple[float, float, str | None]]:
+    """Numeric ranges stated in the text as (low, high, unit); unit is required for open-ended ranges.
+
+    With ``codes``, only ranges on a line that mentions one of those codes count: in a code table,
+    "S2260 … 40 weeks" must not be supported by "S2267 … 32 weeks or greater" on another row."""
+    found: list[tuple[float, float, str | None]] = []
+    for line in text.splitlines():
+        if codes and not codes & set(_CODE_RE.findall(line)):
+            continue
+        found += [(float(a), float(b), _unit(u)) for a, b, u in _RANGE_RE.findall(line) if float(a) < float(b)]
+        found += [(float(a), float("inf"), _unit(u)) for a, u in _OPEN_RANGE_RE.findall(line)]
+    return found
+
+
+def _in_a_range(number: str, unit: str | None, ranges: list[tuple[float, float, str | None]]) -> bool:
+    try:
+        value = float(number)
+    except ValueError:
+        return False
+    for low, high, range_unit in ranges:
+        if not low <= value <= high:
+            continue
+        if high == float("inf") and unit != range_unit:
+            continue  # "32 weeks or greater" supports "35 weeks", not code 99210
+        return True
+    return False
+
+
 def lexical_support(claim: str, evidence: str) -> tuple[float, list[str]]:
-    """Return (coverage of claim content words by evidence, numbers missing from evidence)."""
+    """Return (coverage of claim content words by evidence, numbers missing from evidence).
+
+    A number is supported when it appears in the evidence or falls inside a range the evidence
+    states: "20 weeks" is supported by "17 to 24 weeks", code 99203 by "99202 - 99205"."""
     claim_words = content_words(claim)
     evidence_words = content_words(evidence)
     coverage = 1.0 if not claim_words else len(claim_words & evidence_words) / len(claim_words)
     evidence_numbers = numbers_in(evidence)
-    missing_numbers = sorted(n for n in numbers_in(claim) if n not in evidence_numbers)
+    codes = set(_CODE_RE.findall(claim)) & set(_CODE_RE.findall(evidence))  # codes the claim is about
+    ranges = ranges_in(evidence, codes=codes or None)
+    units = {m.group(1): _unit(m.group(2)) for m in _NUMBER_UNIT_RE.finditer(claim)}
+    missing_numbers = sorted(n for n in numbers_in(claim)
+                             if n not in evidence_numbers and not _in_a_range(n, units.get(n), ranges))
     return coverage, missing_numbers
 
 

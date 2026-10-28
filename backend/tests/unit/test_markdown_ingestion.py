@@ -310,3 +310,51 @@ def test_deeply_nested_lists_do_not_swallow_later_headings():
     chunks = chunk_document(parsed, "doc", chunk_size=512, chunk_overlap=64, min_chunk_tokens=0)
     precert = [c for c in chunks if "Precert required." in c.text]
     assert precert and precert[0].heading_path[-1] == "Precertification"
+
+
+def test_split_step_list_repeats_its_parent_steps():
+    # Real case (Abortion policy): the state list was cut into a chunk without the conditions it belongs to.
+    states = "\n".join(f"                - [State {n} - Abortion](https://example.com/{'x' * 40}/{n}.html)" for n in range(60))
+    text = ("# Policy\n\n#### Telemedicine Vendors\n\n"
+            "- **Step:** 1\n"
+            "  - **Action:** Does the plan cover [elective abortions](https://example.com/very/long/link.html)?\n"
+            "    - **If…** Yes\n"
+            "      - **Then…** Is the member in a vendor state?\n"
+            "        - **If…** Yes\n"
+            "          - **Then…** In-Network treatment. Our system auto routes claims for these states:\n"
+            f"{states}\n"
+            "    - **If…** No\n"
+            "      - **Then…** The plan does not cover the vendor.\n")
+    chunks = chunk_document(parse_markdown(text, "p.md"), "doc", chunk_size=300, chunk_overlap=64, min_chunk_tokens=0)
+    later = [c for c in chunks if "State 59" in c.text][0]
+    assert later.chunk_index > chunks[0].chunk_index
+    body = later.text.split("\n", 2)[2]
+    assert body.startswith("- **Step:** 1\n  - **Action:** Does the plan cover elective abortions?")  # link text only
+    assert "Is the member in a vendor state?" in body and "In-Network treatment" in body
+    assert later.metadata["overlap_tokens"] == 0
+
+
+def test_overlap_never_starts_mid_sentence():
+    long_sentence = "Some states require we waive cost share for fully insured In-Network claims " + "and more " * 40 + "."
+    text = "# P\n\n## S\n\n" + "First sentence here. " * 60 + "\n\n" + long_sentence + "\n\n" + "Next part. " * 60
+    chunks = chunk_document(parse_markdown(text, "p.md"), "doc", chunk_size=200, chunk_overlap=40, min_chunk_tokens=0)
+    for c in chunks:
+        body = c.text.split("\n\n", 1)[1] if c.text.startswith("## S") else c.text
+        assert not body.startswith(("states require", "waive", "and more"))
+
+
+def test_embedding_text_has_no_urls_but_chunk_text_keeps_them():
+    text = ("# Policy\n\n## Travel\n\n**See:** [Travel and Lodging - Procedures](https://www20.aetna.com/t/l.html) "
+            "for details. Source: https://www20.aetna.com/x.html\n")
+    chunk = chunk_document(parse_markdown(text, "p.md"), "doc", min_chunk_tokens=0)[-1]
+    assert "https://www20.aetna.com/t/l.html" in chunk.text
+    assert "Travel and Lodging - Procedures" in chunk.embedding_input and "https://" not in chunk.embedding_input
+
+
+def test_extra_search_terms_for_slash_words_codes_and_ranges():
+    from app.retrieval.search_text import extra_search_terms
+
+    extras = extra_search_terms("The Rawlings/Machinify Company; OB/GYN office; RU486 or RU-486; "
+                                "| 99202 - 99205 | visit; call 1-800-555-1234; https://www20.aetna.com/a/b/c.html")
+    assert {"Rawlings Machinify", "OB GYN", "RU 486", "RU486", "99203", "99204"} <= set(extras)
+    assert not any("aetna" in e.lower() or "555" in e for e in extras)

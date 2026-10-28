@@ -6,12 +6,15 @@ Strategy
    the heading path of the section it came from.
 2. Each block becomes one or more *units* no larger than ``chunk_size`` tokens:
    tables are split by row groups with the header (and delimiter) row repeated;
-   lists are split between top-level items; long prose is split at sentence
-   boundaries (falling back to word boundaries).
+   lists are split between top-level items (no overlap); a top-level item that is itself too
+   long (ePolicies step trees: Step → If… → Then…) is split between lines and each
+   later part starts with its parent steps, so conditions are never lost; long
+   prose is split at sentence boundaries (falling back to word boundaries).
 3. Units are packed greedily into chunks within a section. When a section spans
    several chunks, the tail of the previous prose unit (≤ ``chunk_overlap``
-   tokens) is repeated at the start of the next chunk. Tables are never used as
-   overlap; their split parts repeat the header instead.
+   tokens, whole sentences only) is repeated at the start of the next chunk.
+   Tables are never used as overlap; their split parts repeat the header instead,
+   and continued step lists repeat their parent steps instead.
 4. Chunks smaller than ``min_chunk_tokens`` (e.g. a heading followed straight
    by a sub-heading) are merged into a neighbour when the result still fits.
 
@@ -31,7 +34,13 @@ from dataclasses import dataclass, field
 
 from app.ingestion.markdown_parser import Block, ParsedDocument
 
-CHUNKER_VERSION = "v2"  # v2: deeply nested lists no longer swallow later headings
+CHUNKER_VERSION = "v4"  # v2: deep lists keep later headings; v3: split step lists repeat parent steps,
+#                           overlap uses whole sentences only; v4: no URLs in the embedded text,
+#                           extra keyword terms (slash words, code ranges)
+_BULLET_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s")
+MAX_CONTEXT_LINE_CHARS = 200
+MAX_CONTEXT_SHARE = 0.4  # parent steps may use at most this share of a chunk
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")
 _SENTENCE_RE = re.compile(r"(?<=[.!?;:])\s+(?=[A-Z0-9\"'(\[*_-])|\n{2,}|\n(?=\s*[-*+] |\s*\d+[.)] )")
 
 
@@ -51,6 +60,8 @@ class Unit:
     line_start: int
     line_end: int
     table_part: tuple[int, int] | None = None
+    continued: bool = False  # starts with repeated parent steps of a split list item
+
 
     @property
     def tokens(self) -> int:
@@ -93,10 +104,21 @@ def make_chunk_id(document_id: str, chunk_index: int, content_hash: str) -> str:
     return "chk_" + digest[:24]
 
 
+_BARE_URL_RE = re.compile(r"https?://[^\s)\]>|]+")
+
+
+def text_for_embedding(text: str) -> str:
+    """Chunk text without URLs: links keep their text ("[Travel and Lodging - Procedures](https://…)" ->
+    "Travel and Lodging - Procedures"). URLs were ~17% of the text – cost without meaning."""
+    without_links = _MD_LINK_RE.sub(lambda m: m.group(1) if not _BARE_URL_RE.fullmatch(m.group(1)) else "", text)
+    return re.sub(r"[ \t]{2,}", " ", _BARE_URL_RE.sub("", without_links))
+
+
 def build_embedding_input(title: str, heading_path: list[str], text: str) -> str:
-    """The exact text embedded for a chunk: document/section context + content."""
+    """The exact text embedded for a chunk: document/section context + content (URLs removed; the chunk
+    text and its source URLs are stored unchanged for display)."""
     section = " > ".join(heading_path) if heading_path else "(document start)"
-    return f"Document: {title}\nSection: {section}\n\n{text}"
+    return f"Document: {title}\nSection: {section}\n\n{text_for_embedding(text)}"
 
 
 # --------------------------------------------------------------------------- splitting
@@ -176,6 +198,61 @@ def _table_units(block: Block, max_tokens: int) -> list[Unit]:
     ]
 
 
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _parent_steps(lines: list[str], start: int, max_tokens: int) -> list[str]:
+    """Bullet lines above ``lines[start]`` that contain it (each less indented than the next), outermost
+    first – e.g. "- **Step:** 1", "  - **If…** Yes", "    - **Then…** Is the member in a vendor state?"."""
+    limit = _indent(lines[start]) if lines[start].strip() else 10**6
+    chain: list[str] = []
+    for line in reversed(lines[:start]):
+        if not line.strip() or not _BULLET_RE.match(line):
+            continue
+        if _indent(line) < limit:
+            short = _MD_LINK_RE.sub(r"\1", line)  # link text only: URLs would crowd out the conditions
+            if len(short) > MAX_CONTEXT_LINE_CHARS:
+                short = short[:MAX_CONTEXT_LINE_CHARS].rstrip() + " …"
+            chain.insert(0, short)
+            limit = _indent(line)
+            if limit == 0:
+                break
+    # Keep the outermost step and the closest parents when the chain is long.
+    while len(chain) > 2 and estimate_tokens("\n".join(chain)) > max_tokens * MAX_CONTEXT_SHARE:
+        del chain[1]
+    return chain
+
+
+def _split_nested_item(item: str, max_tokens: int) -> list[tuple[str, bool]]:
+    """Split one oversized list item between lines; every part after the first starts with the
+    parent steps of its first line. Returns (text, has_parent_steps) pairs."""
+    lines = item.split("\n")
+    parts: list[tuple[str, bool]] = []
+    context: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        if any(line.strip() for line in current):
+            parts.append(("\n".join(context + current), bool(context)))
+
+    for index, line in enumerate(lines):
+        if current and estimate_tokens("\n".join(context + current + [line])) > max_tokens:
+            flush()
+            context, current = _parent_steps(lines, index, max_tokens), []
+        room = max_tokens - estimate_tokens("\n".join(context))
+        if estimate_tokens(line) > room:  # one very long line: split it, keeping the same parents
+            flush()
+            current = []
+            for piece in _split_prose(line, max(32, room)):
+                parts.append(("\n".join(context + [piece]), bool(context)))
+            context = _parent_steps(lines, index + 1, max_tokens) if index + 1 < len(lines) else context
+            continue
+        current.append(line)
+    flush()
+    return parts
+
+
 def _list_units(block: Block, max_tokens: int) -> list[Unit]:
     items = block.list_items or [block.text]
     units: list[Unit] = []
@@ -186,8 +263,8 @@ def _list_units(block: Block, max_tokens: int) -> list[Unit]:
                 units.append(Unit("\n".join(current), "list", block.links, block.line_start, block.line_end))
                 current = []
             units.extend(
-                Unit(piece, "list", block.links, block.line_start, block.line_end)
-                for piece in _split_prose(item, max_tokens)
+                Unit(piece, "list", block.links, block.line_start, block.line_end, continued=continued)
+                for piece, continued in _split_nested_item(item, max_tokens)
             )
             continue
         if current and estimate_tokens("\n".join(current + [item])) > max_tokens:
@@ -221,10 +298,8 @@ def _overlap_tail(text: str, overlap_tokens: int) -> str:
         if estimate_tokens(" ".join([sentence] + tail)) > overlap_tokens:
             break
         tail.insert(0, sentence)
-    if not tail:  # last sentence alone is longer than the overlap budget: take trailing words
-        words = text.split()
-        approx = max(1, int(overlap_tokens / 1.3))
-        return " ".join(words[-approx:])
+    # No partial sentences: "Some states require…" cut to "states require…" changes the meaning.
+    # When the last sentence alone is longer than the overlap budget, there is no overlap.
     return " ".join(tail)
 
 
@@ -296,7 +371,9 @@ def chunk_document(
                 drafts.append(current)
                 previous = current.units[-1]
                 overlap = ""
-                if chunk_overlap and previous.kind not in ("table", "code") and unit.kind != "table":
+                # Overlap is for prose only: a list part either starts a new self-contained item or
+                # (when continued) repeats its parent steps instead.
+                if chunk_overlap and previous.kind not in ("table", "code", "list") and unit.kind != "table":
                     overlap = _overlap_tail(previous.text, chunk_overlap)
                 parts = [heading_text] if heading_text else []
                 if overlap:

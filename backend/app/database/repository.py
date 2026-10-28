@@ -13,6 +13,8 @@ import psycopg
 from pgvector import Vector
 from psycopg.types.json import Jsonb
 
+from app.retrieval.search_text import search_text
+
 # Session-level advisory lock key that serialises ingestion runs (CLI + API).
 INGESTION_LOCK_KEY = 0x4550_4F4C  # "EPOL"
 
@@ -83,7 +85,7 @@ def get_all_documents(conn: psycopg.Connection) -> dict[str, dict[str, Any]]:
 _TSV_SQL = (
     "setweight(to_tsvector(%(cfg)s::regconfig, %(title)s), 'A') || "
     "setweight(to_tsvector(%(cfg)s::regconfig, %(headings)s), 'B') || "
-    "setweight(to_tsvector(%(cfg)s::regconfig, %(text)s), 'C')"
+    "setweight(to_tsvector(%(cfg)s::regconfig, %(search_text)s), 'C')"
 )
 
 
@@ -160,6 +162,7 @@ def replace_document(
                     "cfg": text_search_config,
                     "title": doc.title,
                     "headings": " ".join(c.heading_path),
+                    "search_text": search_text(c.text),  # text + slash parts, code-range members, …
                 }
                 for c in chunks
             ],
@@ -249,6 +252,16 @@ def indexed_document_titles(conn: psycopg.Connection) -> list[tuple[str, str]]:
         "SELECT title, relative_path FROM documents WHERE status = 'indexed' ORDER BY title, relative_path"
     ).fetchall()
     return [(row["title"], row["relative_path"]) for row in rows]
+
+
+def indexed_section_headings(conn: psycopg.Connection) -> list[tuple[str, str]]:
+    """(document title, section heading) for every heading of every indexed document."""
+    rows = conn.execute(
+        """SELECT DISTINCT d.title, h.heading FROM chunks c JOIN documents d USING (document_id),
+                  unnest(c.heading_path) AS h(heading)
+           WHERE d.status = 'indexed' AND h.heading <> d.title"""
+    ).fetchall()
+    return [(row["title"], row["heading"]) for row in rows]
 
 
 def get_document(conn: psycopg.Connection, document_id: str) -> dict[str, Any] | None:

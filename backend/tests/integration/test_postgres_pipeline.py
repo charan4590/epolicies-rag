@@ -317,7 +317,7 @@ def test_agentic_flow_with_follow_up_retrieval_and_persistence(db, markdown_dir)
                                          "an approved critical project", "source_ids": [label], "support": "explicit"}],
                 "insufficient_evidence": False, "missing_information": [], "conflicts": []}
 
-    # "rules" occurs in no fixture policy, so the planner (spelling correction) runs for this question.
+    # "rules" occurs in no fixture policy but is not a misspelling, so no planner call is needed.
     plan_leave = {"standalone_question": "Tell me about leave rules", "is_policy_question": True,
                   "intent": "leave overview", "key_terms": ["leave"], "identifiers": [], "exact_phrases": [],
                   "search_queries": ["leave rules"], "retrieval_emphasis": "balanced",
@@ -325,7 +325,7 @@ def test_agentic_flow_with_follow_up_retrieval_and_persistence(db, markdown_dir)
     llm = FakeLLM({"evidence_check": evidence, "answer": answer, "planning": plan_leave})
     service = RAGService(get_settings(), embedder=FakeEmbedder(), llm=llm)
     response = service.answer(ChatRequest(question="Tell me about leave rules", include_diagnostics=True))
-    assert any("rules" in note for note in d_notes(response))
+    assert not any("spelling" in note for note in d_notes(response)) and "planning" not in llm.stages()
     d = response.diagnostics
     assert d["retrieval_rounds"] >= 1 and d["stop_reason"] in {"sufficient_evidence", "no_new_evidence",
                                                                "max_rounds_reached", "no_follow_up_queries"}
@@ -416,3 +416,44 @@ def test_documents_from_an_older_chunker_are_rechunked_with_cached_embeddings(db
     assert embedder.stats.requests == 0  # same chunk texts: every embedding comes from the cache
     third, _ = ingest()
     assert third.unchanged_documents == first.documents_indexed
+
+
+def test_ambiguous_acronyms_and_state_codes_are_not_expanded(db, markdown_dir):
+    # Real case: "MA" was learned as Medicare Advantage, but the Abortion policy uses MA for Massachusetts.
+    (markdown_dir / "mixed").mkdir(exist_ok=True)
+    (markdown_dir / "mixed" / "directives.md").write_text(
+        "# Directives\n\n| Term | Definition |\n| --- | --- |\n| MA | Medicare Advantage |\n"
+        "| EOC | Evidence of Coverage |\n\nSee the MA plan's EOC.\n")
+    (markdown_dir / "mixed" / "states.md").write_text(
+        "# State routing\n\n- [Massachusetts (MA) - Abortion](https://example.com/ma)\n"
+        "- [New York (NY) - Abortion](https://example.com/ny)\n\nClaims for these states are auto routed.\n"
+        "Prior Authorization (PA) is needed. Physician Assistant (PA) visits are covered.\n")
+    ingest()
+    with connection() as conn:
+        assert keyword_query_with_synonyms(conn, "Is abortion coverage in MA auto routed?") == \
+            "Is abortion coverage in MA auto routed? termination of pregnancy"
+        assert keyword_query_with_synonyms(conn, "is NY auto routed").endswith("new york")
+        assert keyword_query_with_synonyms(conn, "what does the EOC say").endswith("evidence of coverage")
+        assert "physician" not in keyword_query_with_synonyms(conn, "is PA needed")  # two meanings: skipped
+
+
+def test_typo_detection_keyword_formats_and_heading_boost(db, markdown_dir):
+    from app.retrieval.keyword_search import likely_typos
+
+    (markdown_dir / "claims").mkdir(exist_ok=True)
+    (markdown_dir / "claims" / "accident.md").write_text(
+        "# Accident Claims\n\n## Subrogation\n\nThe Rawlings/Machinify Company handles subrogation for accident "
+        "claims. RU486 is a drug.\n\n## Codes\n\n| Code | Description |\n| --- | --- |\n"
+        "| 99202 - 99205 | Office visit for a new patient |\n\n"
+        "## Reimbursement for Travel\n\n**See:** [Travel and Lodging - Procedures](https://example.com/t.html)\n\n"
+        "## Long section about many things\n\n" + "Travel is mentioned in this long section about claims. " * 40 + "\n")
+    ingest()
+    with connection() as conn:
+        assert likely_typos(conn, "who handles subrogaton for acident claims") == ["subrogaton", "acident"]
+        assert likely_typos(conn, "tell me everything about parking for the kind dept") == []
+        assert [c.heading_path[-1] for c in keyword_search(conn, "what does Rawlings Machinify do", top_k=1)] == \
+            ["Subrogation"]
+        assert [c.heading_path[-1] for c in keyword_search(conn, "code 99203", top_k=1)] == ["Codes"]
+        assert keyword_search(conn, "is RU-486 a drug", top_k=1)[0].heading_path[-1] == "Subrogation"
+        assert keyword_search(conn, "reimbursement for travel", top_k=1)[0].heading_path[-1] == \
+            "Reimbursement for Travel"

@@ -27,11 +27,24 @@ logger = logging.getLogger(__name__)
 
 BUILTIN_GROUPS: tuple[tuple[str, ...], ...] = (
     ("abortion", "termination of pregnancy"),
-    ("precertification", "prior authorization", "preauthorization"),
+    ("precertification", "precert", "prior authorization", "preauthorization"),
+    ("department", "dept"),
     ("non-participating", "out-of-network"),
     ("joint venture", "joint partnership"),
 )
 _SMALL_WORDS = {"of", "and", "the", "for", "to", "in", "on", "a", "an", "&"}
+US_STATES = {
+    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas", "ca": "california", "co": "colorado",
+    "ct": "connecticut", "de": "delaware", "dc": "district of columbia", "fl": "florida", "ga": "georgia",
+    "hi": "hawaii", "id": "idaho", "il": "illinois", "in": "indiana", "ia": "iowa", "ks": "kansas",
+    "ky": "kentucky", "la": "louisiana", "me": "maine", "md": "maryland", "ma": "massachusetts",
+    "mi": "michigan", "mn": "minnesota", "ms": "mississippi", "mo": "missouri", "mt": "montana",
+    "ne": "nebraska", "nv": "nevada", "nh": "new hampshire", "nj": "new jersey", "nm": "new mexico",
+    "ny": "new york", "nc": "north carolina", "nd": "north dakota", "oh": "ohio", "ok": "oklahoma",
+    "or": "oregon", "pa": "pennsylvania", "pr": "puerto rico", "ri": "rhode island", "sc": "south carolina",
+    "sd": "south dakota", "tn": "tennessee", "tx": "texas", "ut": "utah", "vt": "vermont", "va": "virginia",
+    "wa": "washington", "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming",
+}
 _ACRONYM_SQL = r"""
     SELECT m[1] AS before, m[2] AS acronym
     FROM chunks c, regexp_matches(c.text, '((?:[A-Za-z][A-Za-z/-]*\s+){1,8})\(([A-Z][A-Z0-9&]{1,7})\)', 'g') AS m
@@ -73,6 +86,11 @@ def load_file_groups(path: Path | None) -> list[tuple[str, ...]]:
         return []
 
 
+def _meaning(phrase: str) -> str:
+    """'Coordination of Benefits' and 'coordination of benefit' are the same meaning."""
+    return " ".join(w[:-1] if w.endswith("s") and len(w) > 3 else w for w in phrase.split() if w not in _SMALL_WORDS)
+
+
 class SynonymIndex:
     """Equivalent-term groups (lower-cased); acronyms are refreshed when the index changes."""
 
@@ -92,8 +110,18 @@ class SynonymIndex:
             phrase = acronym_from(row["before"], row["acronym"])
             if phrase and len(row["acronym"]) >= 2:
                 pairs.setdefault(row["acronym"].lower(), set()).add(_norm(phrase))
-        # An acronym with many different expansions is ambiguous; skip it.
-        groups = [(acr, *sorted(phrases)) for acr, phrases in sorted(pairs.items()) if len(phrases) <= 2]
+        # A state code used as a state anywhere ("Massachusetts (MA)") is ambiguous when it was also learned
+        # with another meaning ("MA" = Medicare Advantage), so expanding it would search the wrong topic.
+        state_codes = [acr for acr in pairs if acr in US_STATES and pairs[acr] != {US_STATES[acr]}]
+        used_as_state = {
+            acr for acr in state_codes
+            if conn.execute("SELECT EXISTS (SELECT 1 FROM chunks WHERE text ~* %s) AS used",
+                            (rf"{US_STATES[acr]}\s*\({acr}\)",)).fetchone()["used"]
+        }
+        # An acronym learned with different meanings is ambiguous too; only one meaning is expanded.
+        groups = [(acr, *phrases) for acr, phrases in sorted(pairs.items())
+                  if len({_meaning(p) for p in phrases}) == 1 and acr not in used_as_state]
+        groups = [(acr, sorted(rest, key=len)[0]) for acr, *rest in groups]
         with self._lock:
             self._signature, self._acronym_groups = signature, groups
         return groups

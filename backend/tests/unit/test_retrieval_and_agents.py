@@ -250,3 +250,61 @@ def test_referenced_policies_in_epolicies_see_format():
         "Coverage Details: Spontaneous Abortion (Miscarriage)",
         "Maternity - Traditional Claim Processing",
     ]
+
+
+def test_numbers_inside_a_stated_range_are_supported():
+    # Real cases: S2260 "17 to 24 weeks" and the code range "99202 - 99205" made correct answers "partially verified".
+    from app.agents.citation_verifier import lexical_support
+
+    codes = ("| S2260 | Induced abortion, 17 to 24 weeks |\n| S2267 | Induced abortion, 32 weeks or greater |\n"
+             "| 99202 - 99205 | Office or other outpatient visit for the evaluation and management of a new patient |")
+    assert lexical_support("An induced abortion at 20 weeks uses S2260", codes)[1] == []
+    assert lexical_support("Code 99203 is an office visit for a new patient", codes)[1] == []
+    assert lexical_support("An induced abortion at 35 weeks uses S2267", codes)[1] == []
+    assert lexical_support("Code 99210 is an office visit for a new patient", codes)[1] == ["99210"]
+    # A range on another code's row does not count: S2260 is 17-24 weeks, not "32 weeks or greater" (S2267)
+    assert lexical_support("An induced abortion at 40 weeks uses S2260", codes)[1] == ["40"]
+    assert lexical_support("Hotels are reimbursed up to $300", "Hotels are reimbursed up to $250 per night")[1] == ["300"]
+    # Phone numbers and dates are not ranges
+    assert lexical_support("Call 1-800-555-1000", "Call 1-800-555-1234")[1] == ["1000"]
+    assert lexical_support("Effective 06/04/25", "Modified - Effective 06/03/25")[1] != []
+
+
+def test_only_references_related_to_the_question_are_followed():
+    # Real case: "induced abortion at 20 weeks" also searched Maternity, Nonpar Precertification, ASH and
+    # Legislation by Topic – none related to the question.
+    from app.agents.retrieval_agent import relevant_references
+
+    refs = ["Maternity - Individual Claim Processing: Instructions: Length of Hospital Stay for Delivery",
+            "Precertification - Policy - Precertification: Nonparticipating Provider Authorizations",
+            "Legislation by Topic", "Travel and Lodging - Procedures",
+            "Coverage Details: Spontaneous Abortion (Miscarriage)"]
+    assert relevant_references(refs, "Which code is used for an induced abortion at 20 weeks?",
+                               ["Specific CPT code for an induced abortion at 20 weeks"],
+                               {"coverage details: spontaneous abortion (miscarriage)"}) == []
+    travel = relevant_references(refs, "Is travel reimbursed for an elective abortion?",
+                                 ["Whether travel and lodging expenses are reimbursed"], set())
+    assert travel[0] == "Travel and Lodging - Procedures" and len(travel) <= 2
+    nonpar = relevant_references(refs, "precert for a non-participating provider?", [], set())
+    assert nonpar == ["Precertification - Policy - Precertification: Nonparticipating Provider Authorizations"]
+
+
+def test_out_of_scope_question_stops_after_one_extra_round(monkeypatch):
+    from app.agents.query_planner import deterministic_plan
+    from app.agents.retrieval_agent import RetrievalAgent
+    from app.config import get_settings
+    from app.retrieval.hybrid_search import SearchResult
+
+    found = [chunk("a", "d1", 'Hotels are reimbursed. **See:** [Travel and Lodging - Procedures](https://x/t.html)'),
+             chunk("b", "d1", "Leave is accrued monthly."), chunk("c", "d2", "Badges must be worn.")]
+    calls = iter(range(10))
+    monkeypatch.setattr(RetrievalAgent, "_search",
+                        lambda self, q, plan, first_round: SearchResult(chunks=[found[next(calls) % 3]]))
+    llm = FakeLLM({"evidence_check": {"sufficient": False, "confidence": "low", "relevant_source_ids": [],
+                                      "missing_information": ["office parking rules"],
+                                      "follow_up_queries": ["parking garage policy"]}})
+    outcome = RetrievalAgent(get_settings(), embedder=None, llm=llm).run(
+        deterministic_plan("What is the office parking policy?"), usage=LLMUsage(),
+        emit=lambda e: None, check_cancel=lambda: None)
+    assert len(outcome.rounds) == 2 and outcome.stop_reason == "nothing_relevant"
+    assert not any(r.referenced_policies for r in outcome.rounds) and outcome.relevant_ids == []

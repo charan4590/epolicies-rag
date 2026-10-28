@@ -134,7 +134,7 @@ def rc(cid: str, text: str, title: str = "Employee Leave Policy") -> RetrievedCh
 @pytest.fixture()
 def service(monkeypatch):
     svc = RAGService(get_settings(), embedder=FakeEmbedder(), llm=FakeLLM())
-    monkeypatch.setattr("app.services.rag_service.unknown_terms", lambda *a, **k: [])
+    monkeypatch.setattr("app.services.rag_service.likely_typos", lambda *a, **k: [])
     lookup = {}
     monkeypatch.setattr(svc, "_lookup", lambda ids: {i: lookup[i] for i in ids if i in lookup})
     svc.lookup_rows = lookup

@@ -13,6 +13,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agents.citation_verifier import content_words
 from app.agents.evidence_checker import EvidenceAssessment, assess_evidence
 from app.agents.query_planner import QueryPlan
 from app.config import Settings
@@ -32,6 +33,35 @@ _REFERENCE = re.compile(
     r"[\s:*\-–]*(?:the\s+)?(?:[\"“]([^\"”\n]{4,150})[\"”]|\[([^\]\n]{4,150})\]\()",
     re.IGNORECASE,
 )
+
+
+MAX_REFERENCES_PER_ROUND = 2
+# Words that appear in most policy names and say nothing about the topic
+_GENERIC_NAME_WORDS = content_words(
+    "policy policies procedures procedure coverage details overview claim claims processing instructions "
+    "medicare hrp aetna traditional individual commercial topic see"
+)
+
+
+def _topic_words(text: str) -> set[str]:
+    """Content words with hyphenated words also joined ("non-participating" ~ "Nonparticipating")."""
+    return (content_words(text) | content_words(text.replace("-", ""))) - _GENERIC_NAME_WORDS
+
+
+def relevant_references(references: Sequence[str], question: str, missing: Sequence[str],
+                        known_sections: set[str]) -> list[str]:
+    """References worth searching: their name shares a topic word with the question or with what is still
+    missing, and they are not a section that was already retrieved. At most MAX_REFERENCES_PER_ROUND."""
+    wanted = _topic_words(" ".join([question, *missing]))
+    scored = []
+    for name in references:
+        if name.lower() in known_sections or name.split(":")[-1].strip().lower() in known_sections:
+            continue
+        overlap = len(_topic_words(name) & wanted)
+        if overlap:
+            scored.append((overlap, name))
+    scored.sort(key=lambda item: -item[0])
+    return [name for _, name in scored[:MAX_REFERENCES_PER_ROUND]]
 
 
 def referenced_policies(chunks: Sequence[RetrievedChunk]) -> list[str]:
@@ -103,8 +133,12 @@ class RetrievalAgent:
         tried: list[str] = []
         outcome = RetrievalOutcome(chunks=[], all_retrieved_ids=set())
         queries = plan.search_queries[: settings.max_queries_per_round] or [plan.standalone_question]
+        max_rounds = settings.max_retrieval_rounds
 
         for round_no in range(1, settings.max_retrieval_rounds + 1):
+            if round_no > max_rounds:
+                outcome.stop_reason = "nothing_relevant"
+                break
             check_cancel()
             emit({"type": "stage", "stage": "retrieval", "round": round_no,
                   "message": f"Searching policies (round {round_no})"})
@@ -152,10 +186,23 @@ class RetrievalAgent:
             if round_no == settings.max_retrieval_rounds:
                 outcome.stop_reason = "max_rounds_reached"
                 break
+            if not relevant:
+                # Nothing relevant yet (often an out-of-scope question): one more search with the checker's
+                # queries, no referenced policies, then stop.
+                max_rounds = min(max_rounds, round_no + 1)
+                if not assessment.follow_up_queries:
+                    outcome.stop_reason = "nothing_relevant"
+                    break
+                queries = assessment.follow_up_queries[: settings.max_queries_per_round]
+                continue
+            max_rounds = settings.max_retrieval_rounds  # relevant evidence found: normal round limit
             # Policies that the relevant passages point to ("refer to the ... policy") are searched next,
-            # ahead of the checker's own follow-up queries.
-            relevant_chunks = [pool[cid] for cid in relevant if cid in pool] or candidates
-            references = [r for r in referenced_policies(relevant_chunks) if r not in tried]
+            # ahead of the checker's own follow-up queries – only those related to the question.
+            relevant_chunks = [pool[cid] for cid in relevant if cid in pool]
+            known_sections = {c.heading_path[-1].lower() for c in pool.values() if c.heading_path}
+            references = relevant_references(
+                [r for r in referenced_policies(relevant_chunks) if r not in tried],
+                plan.standalone_question, assessment.missing_information, known_sections)
             follow_ups = list(dict.fromkeys(references + assessment.follow_up_queries))
             if not follow_ups:
                 outcome.stop_reason = "no_follow_up_queries"

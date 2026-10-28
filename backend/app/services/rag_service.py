@@ -30,7 +30,7 @@ from app.config import Settings, get_settings
 from app.database import repository as repo
 from app.database.connection import connection
 from app.ingestion.embedder import Embedder, GeminiEmbedder
-from app.retrieval.keyword_search import unknown_terms
+from app.retrieval.keyword_search import likely_typos
 from app.llm.gemini import GeminiError, GeminiLLM, LLMUsage
 from app.retrieval.types import RetrievedChunk
 from app.schemas.api_models import (
@@ -139,14 +139,14 @@ class RAGService:
             # search uses the corrected words (vector search tolerates typos, keyword search does not).
             try:
                 with connection() as conn:
-                    misspelt = unknown_terms(conn, request.question, ts_config=self.settings.text_search_config)
+                    misspelt = likely_typos(conn, request.question, ts_config=self.settings.text_search_config)
             except Exception:  # noqa: BLE001 - a spelling hint is optional; retrieval reports DB errors
                 logger.warning("unknown_terms_check_failed", exc_info=True)
             mode = "always" if misspelt else mode
         plan = plan_query(request.question, history, llm=self.llm, mode=mode, usage=usage,
                           max_queries=self.settings.max_queries_per_round)
         if misspelt:
-            plan.notes.append("Words not found in any policy: " + ", ".join(misspelt)
+            plan.notes.append("Possible spelling mistakes: " + ", ".join(misspelt)
                               + " – Gemini corrected the question before searching.")
         t = mark("planning", t)
         check()
@@ -163,7 +163,11 @@ class RAGService:
         t = mark("retrieval", t)
         check()
 
-        if not outcome.chunks:
+        nothing_relevant = (outcome.assessment is not None and not outcome.assessment.sufficient
+                            and not outcome.relevant_ids)
+        if not outcome.chunks or nothing_relevant:
+            # The evidence check found no relevant passage in any round: answer "not found" without
+            # asking Gemini to write an answer that strict grounding would withhold anyway.
             response = ChatResponse(
                 answer=NO_EVIDENCE_REPLY, citations=[], insufficient_evidence=True,
                 missing_information=outcome.missing_information or ["No relevant passages were retrieved."],
@@ -210,7 +214,8 @@ class RAGService:
             return None
         with connection() as conn:
             titles = repo.indexed_document_titles(conn)
-        answer = build_catalog_answer(parsed, titles)
+            sections = repo.indexed_section_headings(conn) if parsed.filter_terms else None
+        answer = build_catalog_answer(parsed, titles, sections)
         if answer is None:
             return None
         response = ChatResponse(

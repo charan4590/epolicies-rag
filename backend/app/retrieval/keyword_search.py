@@ -4,7 +4,9 @@ identifier/phrase channel for terms that stemming would break apart
 
 from __future__ import annotations
 
+import difflib
 import re
+import threading
 from collections.abc import Sequence
 
 import psycopg
@@ -13,6 +15,7 @@ from app.retrieval.types import CHUNK_COLUMNS, RetrievedChunk
 
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 MAX_TERMS = 32
+HEADING_BOOST = 1.0  # added × share of the query terms found in the chunk's own section heading
 
 # A small stop-list so OR-queries are not dominated by question words. PostgreSQL's
 # english configuration removes standard stop words as well.
@@ -57,6 +60,13 @@ def keyword_search(
         WITH q AS (SELECT to_tsquery(%(cfg)s::regconfig, %(tsq)s) AS query)
         SELECT {CHUNK_COLUMNS},
                ts_rank_cd(c.search_tsv, q.query, 32)
+               -- boost when the question matches the chunk's own section heading, so a short section
+               -- ("Reimbursement for Travel for an Elective Abortion") is not buried under long ones
+               + %(heading_boost)s * (
+                     SELECT count(*) FROM unnest(%(terms)s::text[]) t
+                     WHERE to_tsvector(%(cfg)s::regconfig, coalesce(c.heading_path[array_length(c.heading_path, 1)], ''))
+                           @@ plainto_tsquery(%(cfg)s::regconfig, t)
+                 )::float / %(n_terms)s
                + COALESCE((SELECT count(*) FROM unnest(%(phrases)s::text[]) p
                            WHERE c.search_tsv @@ phraseto_tsquery(%(cfg)s::regconfig, p)), 0) AS score
         FROM chunks c JOIN documents d ON d.document_id = c.document_id, q
@@ -64,7 +74,8 @@ def keyword_search(
         ORDER BY score DESC, c.chunk_id
         LIMIT %(k)s
         """,
-        {"cfg": ts_config, "tsq": tsquery, "k": top_k, "phrases": phrase_list},
+        {"cfg": ts_config, "tsq": tsquery, "k": top_k, "phrases": phrase_list, "heading_boost": HEADING_BOOST,
+         "terms": terms, "n_terms": len(terms)},
     ).fetchall()
     results: list[RetrievedChunk] = []
     for rank, row in enumerate(rows, start=1):
@@ -95,6 +106,62 @@ def unknown_terms(conn: psycopg.Connection, text: str, *, ts_config: str = "engl
         {"terms": terms, "cfg": ts_config},
     ).fetchall()
     return [row["term"] for row in rows]
+
+
+MIN_TYPO_LENGTH = 5
+TYPO_SIMILARITY = 0.8
+
+
+class _Vocabulary:
+    """Stemmed words of all indexed chunks (from the full-text index), cached until the index changes."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._signature: tuple | None = None
+        self._words: list[str] = []
+
+    def words(self, conn: psycopg.Connection) -> list[str]:
+        signature = tuple(conn.execute("SELECT count(*) AS n, max(created_at) AS newest FROM chunks").fetchone().values())
+        with self._lock:
+            if signature == self._signature:
+                return self._words
+        rows = conn.execute("SELECT word FROM ts_stat('SELECT search_tsv FROM chunks')").fetchall()
+        words = sorted({r["word"] for r in rows if r["word"].isalpha() and len(r["word"]) >= 4})
+        with self._lock:
+            self._signature, self._words = signature, words
+        return words
+
+
+_vocabulary = _Vocabulary()
+
+
+def _close_to_vocabulary(stem: str, words: list[str]) -> bool:
+    if difflib.get_close_matches(stem, words, n=1, cutoff=TYPO_SIMILARITY):
+        return True
+    # Stems are short ("subrogation" -> "subrog"): compare the same length ("subrogaton" -> "subrog").
+    return any(len(w) >= MIN_TYPO_LENGTH and stem[:3] == w[:3] and len(stem) > len(w)
+               and difflib.SequenceMatcher(None, stem[:len(w)], w).ratio() >= 0.85 for w in words)
+
+
+def likely_typos(conn: psycopg.Connection, text: str, *, ts_config: str = "english") -> list[str]:
+    """Question words found in no policy that look like misspellings of a policy word.
+
+    "jpoint", "partership", "subrogaton", "acident" count; normal words that the policies simply do not
+    use ("everything", "parking", "kind"), short words and anything with digits ("486", "99203") do not,
+    so they do not cost an extra Gemini call.
+    """
+    candidates = [t for t in unknown_terms(conn, text, ts_config=ts_config)
+                  if t.isalpha() and len(t) >= MIN_TYPO_LENGTH]
+    if not candidates:
+        return []
+    words = _vocabulary.words(conn)
+    typos: list[str] = []
+    for term in candidates:
+        stem = conn.execute("SELECT coalesce((tsvector_to_array(to_tsvector(%s::regconfig, %s)))[1], %s) AS s",
+                            (ts_config, term, term)).fetchone()["s"]
+        if _close_to_vocabulary(stem, words):
+            typos.append(term)
+    return typos
 
 
 def word_boundary_pattern(term: str) -> str:

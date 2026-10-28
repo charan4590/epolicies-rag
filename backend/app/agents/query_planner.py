@@ -28,6 +28,8 @@ _IDENTIFIER_PATTERNS = [
     re.compile(r"§\s*\d+(?:\.\d+)*"),
     re.compile(r"\b\d{3}\([a-z]\)"),  # 401(k)
     re.compile(r"\b[A-Z]{1,6}\d{2,}[A-Z0-9]*\b"),  # GDPR2016, ISO27001
+    re.compile(r"(?<![\d./-])\d{5}(?![\d./]|-\d)"),  # 5-digit procedure codes: 59866
+    re.compile(r"(?<![\d/])\d{1,2}/\d{1,2}/\d{2,4}(?![\d/])"),  # dates: 06/03/25
 ]
 _ACRONYM = re.compile(r"\b[A-Z]{2,6}s?\b")
 _QUOTED = re.compile(r"[\"“”']([^\"“”']{3,80})[\"“”']")

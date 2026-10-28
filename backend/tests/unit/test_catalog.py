@@ -64,3 +64,24 @@ def test_filtered_answer_and_no_match_falls_back():
     answer = build_catalog_answer(parse_catalog_question("list all policies about ambulance"), TITLES)
     assert "**2**" in answer and "Coordination" not in answer
     assert build_catalog_answer(parse_catalog_question("list all policies about dental"), TITLES) is None
+
+
+@pytest.mark.parametrize("question, kind, terms", [
+    ("how mny policies are there", "count", []),
+    ("how many polices are there", "count", []),
+    ("which policies mention HRP", "list", ["HRP"]),
+    ("how many policies are there in medicare", "count", ["medicare"]),
+])
+def test_typos_and_mention_or_in_filters(question, kind, terms):
+    parsed = parse_catalog_question(question)
+    assert parsed is not None and parsed.kind == kind and parsed.filter_terms == terms
+
+
+def test_filter_falls_back_to_section_headings():
+    sections = [("Accident - Medicare HRP Claim Processing", "Processing Instructions: Subrogation/Reimbursement"),
+                ("Accident - Medicare HRP Claim Processing", "Subrogation Provision: Processing Guidelines"),
+                ("Abortion - Policy", "Coverage Details: Procedure Codes")]
+    answer = build_catalog_answer(parse_catalog_question("list all policies about subrogation"), TITLES, sections)
+    assert "No policy title contains “subrogation”" in answer and "**2** sections in **1** policy" in answer
+    assert "Accident - Medicare HRP Claim Processing › Subrogation Provision: Processing Guidelines" in answer
+    assert build_catalog_answer(parse_catalog_question("list all policies about dental"), TITLES, sections) is None

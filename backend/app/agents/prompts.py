@@ -70,6 +70,9 @@ Rules:
 7. Format answer_markdown as clear GitHub-flavoured Markdown (short paragraphs, bullet lists, or a table
    where helpful). Do not include a sources list at the end; sources are displayed separately.
 8. `claims`: list each distinct factual statement in your answer with the labels that support it.
+9. If a source only points to another policy or page for the details (for example "See: [Travel and Lodging -
+   Procedures](link)") and that policy is not among the sources, say that the details are in that policy,
+   name it and give its link exactly as written in the source, and cite the source that points to it.
 {UNTRUSTED_NOTICE}"""
 
 VERIFIER_SYSTEM = f"""You check whether claims are supported by the cited policy excerpts.
