@@ -1,6 +1,7 @@
 "use client";
 
-import { Menu, ShieldCheck } from "lucide-react";
+import { Menu } from "lucide-react";
+import { BrandMark } from "@/components/layout/brand-mark";
 import { Suspense, useState, type ReactNode } from "react";
 
 import { Sidebar, SidebarFallback } from "@/components/layout/sidebar";
@@ -33,7 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Button variant="ghost" size="icon-sm" onClick={() => setOpen(true)} aria-label="Open navigation">
             <Menu />
           </Button>
-          <ShieldCheck className="size-4 text-primary" aria-hidden />
+          <BrandMark className="size-6" iconClassName="size-3.5" />
           <span className="text-sm font-semibold">ePolicies AI Assistant</span>
         </header>
         <main className="flex min-h-0 flex-1 flex-col">{children}</main>

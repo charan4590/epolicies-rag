@@ -9,6 +9,8 @@ export const metadata: Metadata = {
   title: { default: "ePolicies AI Assistant", template: "%s · ePolicies AI Assistant" },
   description: "Ask questions about company policies and get answers with verified citations.",
   robots: { index: false, follow: false },
+  // Browser-tab icon: the assistant logo when configured (frontend/.env.local), else app/favicon.ico
+  ...(process.env.NEXT_PUBLIC_APP_LOGO ? { icons: { icon: process.env.NEXT_PUBLIC_APP_LOGO } } : {}),
 };
 
 export const viewport: Viewport = {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, MessageSquare, MessageSquarePlus, ShieldCheck, Trash2 } from "lucide-react";
+import { FileText, MessageSquare, MessageSquarePlus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { BrandMark, CompanyLogo } from "@/components/layout/brand-mark";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -21,13 +22,14 @@ const NAV = [
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
-      <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-        <ShieldCheck className="size-4.5" aria-hidden />
-      </div>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold leading-tight">ePolicies AI Assistant</p>
-        <p className="truncate text-xs text-muted-foreground">Policy knowledge base</p>
+    <div className="space-y-3 px-4 pt-4 pb-3">
+      <CompanyLogo className="h-6" />
+      <div className="flex items-center gap-2.5">
+        <BrandMark className="size-8" iconClassName="size-4.5" />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold leading-tight">ePolicies AI Assistant</p>
+          <p className="truncate text-xs text-muted-foreground">Policy knowledge base</p>
+        </div>
       </div>
     </div>
   );

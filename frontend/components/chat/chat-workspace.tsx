@@ -1,6 +1,6 @@
 "use client";
 
-import { Eraser, Loader2, RotateCcw, ShieldCheck, Square, TriangleAlert } from "lucide-react";
+import { Eraser, Loader2, RotateCcw, Square, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AssistantMessage } from "@/components/chat/assistant-message";
 import { ChatInput } from "@/components/chat/chat-input";
 import { Welcome } from "@/components/chat/welcome";
+import { BrandMark } from "@/components/layout/brand-mark";
 import { useConversations } from "@/components/layout/conversations-context";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -225,9 +226,7 @@ export function ChatWorkspace({ conversationId: initialId }: { conversationId?: 
                 </div>
               ) : (
                 <div key={message.id} className="flex gap-3">
-                  <div className="mt-0.5 hidden size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
-                    <ShieldCheck className="size-4" aria-hidden />
-                  </div>
+                  <BrandMark className="mt-0.5 hidden size-7 sm:flex" iconClassName="size-4" />
                   <div className="min-w-0 flex-1 text-sm">
                     {message.status === "pending" && (
                       <div className="flex items-center gap-2 py-1 text-muted-foreground" role="status">

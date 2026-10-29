@@ -20,6 +20,10 @@
 # production
 /build
 
+# local logo files (company branding is not committed to the public repository)
+/public/branding/*
+!/public/branding/README.md
+
 # misc
 .DS_Store
 *.pem
